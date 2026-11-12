@@ -11,7 +11,11 @@ on:
       - '.github/workflows/ci-dylib.yml'
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: mx-dylib-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -44,3 +48,22 @@ jobs:
           name: Mx-iKiraPlus-deb
           path: packages/*.deb
           if-no-files-found: error
+
+      - name: Publish downloadable Mx.dylib release
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The latest source on main wins if older queued runs finish later.
+          LATEST=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          if [ "$GITHUB_SHA" != "$LATEST" ]; then
+            echo "A newer main commit exists; skipping stale release."
+            exit 0
+          fi
+          if ! gh release view mx-ikiraplus-latest >/dev/null 2>&1; then
+            gh release create mx-ikiraplus-latest \
+              --title "Mx iKiraPlus Latest" \
+              --notes "Compiled iOS dylib. Includes video-to-voice and circular Video Notes (640x640), file picker fix, and custom badge."
+          fi
+          gh release upload mx-ikiraplus-latest packages/Mx.dylib --clobber
