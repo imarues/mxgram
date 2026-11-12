@@ -96,6 +96,10 @@
 // audio. Honours the trim handles set in the preview.
 #define kVideoToVoice @"MxVideoToVoice"
 
+// Send a picked video as a proper Telegram circular/round video message.
+// Mutually exclusive with the Video to Voice preview toggle.
+#define kVideoToNote @"MxVideoToNote"
+
 // Ghost Exceptions: peers that keep seeing your real typing/read activity
 // while Ghost Mode stays enabled for everyone else.
 #define kGhostExceptions @"MxGhostExceptions"
