@@ -158,14 +158,14 @@ static BOOL mxLabelIsSupportRow(NSString *label) {
 // to know: iMe's Support row opens a context menu of its own, so telling an iMe
 // user to long-press it sends them to a dead end, and Turrit renames the row
 // outright.
-static BOOL mxHostBundleIs(NSString *bundleId) {
+static __attribute__((unused)) BOOL mxHostBundleIs(NSString *bundleId) {
     return [[[NSBundle mainBundle] bundleIdentifier] isEqualToString:bundleId];
 }
 
 // The row name as the user will actually read it on screen, falling back to
 // English when the host has no entry. Naming a row in a language the user does
 // not have in front of them is worse than not naming it.
-static NSString *mxLocalizedRowName(NSString *key, NSString *fallback) {
+static __attribute__((unused)) NSString *mxLocalizedRowName(NSString *key, NSString *fallback) {
     TGLocalization *loc = getActiveTGLocalization();
     NSString *str = loc ? [loc get:key] : nil;
     if (str.length == 0 || [str isEqualToString:key]) return fallback;
