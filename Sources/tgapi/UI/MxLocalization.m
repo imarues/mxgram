@@ -162,6 +162,12 @@ static NSString *MxLanguageMatchingDevice(void) {
   static dispatch_once_t sOnce;
   dispatch_once(&sOnce, ^{
     sBuiltinEnglish = @{
+      /* Round video notes: safe fallback for languages not yet translated */
+      @"VIDEO_TO_NOTE_ON_TOAST" : @"This video will be sent as a circular video note",
+      @"VIDEO_TO_NOTE_OFF_TOAST" : @"Sending as a normal video again",
+      @"VIDEO_TO_NOTE_CONVERTING" : @"Converting video to a round video note…",
+      @"VIDEO_TO_NOTE_SUCCESS" : @"Round video ready — sending",
+      @"VIDEO_TO_NOTE_FAILED" : @"Could not convert video — sending the original video instead",
       /* Sections */
       @"GHOST_MODE_SECTION_HEADER" : @"Ghost Mode",
       @"READ_RECEIPT_SECTION_HEADER" : @"Read Receipts",
