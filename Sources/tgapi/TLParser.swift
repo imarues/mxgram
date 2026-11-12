@@ -2431,8 +2431,8 @@ class TLParser: NSObject {
             Api.DocumentAttribute.Cons_documentAttributeVideo(
                 flags: (1 << 0) | (1 << 1),
                 duration: upload.duration,
-                w: 384,
-                h: 384,
+                w: 640,
+                h: 640,
                 preloadPrefixSize: nil,
                 videoStartTs: nil,
                 videoCodec: nil))
@@ -2459,7 +2459,7 @@ class TLParser: NSObject {
         var newAttributes: [Api.DocumentAttribute]?
 
         if let name = fileName, let round = roundUpload(forFileName: name) {
-            // Video Note: 384x384 H.264 MP4 with a real Telegram round-video flag.
+            // Video Note: 640x640 H.264 MP4 with a real Telegram round-video flag.
             diag("v2note wire: \(name) -> round video, \(round.duration)s")
             newAttributes = [roundVideoAttribute(round)]
         } else if let name = fileName, let upload = voiceUpload(forFileName: name) {
