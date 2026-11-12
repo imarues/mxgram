@@ -2328,61 +2328,118 @@ class TLParser: NSObject {
 
     private struct RoundVideoUpload {
         let duration: Double
+        let registeredAt: TimeInterval
     }
 
-    // Round uploads are identified by the UUID-based MP4 filename produced
-    // by VideoToVoice.xm. Never toggle unrelated video uploads.
+    // The MediaPicker rewrites the selected item to a file. Telegram may then
+    // replace its filename while uploading, so look up both the document
+    // filename attribute AND the actual InputFile.name on the wire.
     private static let roundQueue = DispatchQueue(label: "com.mx.roundUploads")
     private static var _roundUploads = [String: RoundVideoUpload]()
     private static var _roundOrder = [String]()
+    private static var _roundFallbackUsed = Set<String>()
 
     @objc static func registerRoundVideoUpload(withFileName fileName: String,
                                                 duration: Int) {
         guard !fileName.isEmpty else { return }
         roundQueue.sync {
             if _roundUploads[fileName] == nil { _roundOrder.append(fileName) }
-            _roundUploads[fileName] = RoundVideoUpload(duration: Double(max(1, duration)))
+            _roundUploads[fileName] = RoundVideoUpload(
+                duration: Double(max(1, duration)),
+                registeredAt: Date().timeIntervalSince1970)
+            _roundFallbackUsed.remove(fileName)
             while _roundOrder.count > 32 {
-                _roundUploads.removeValue(forKey: _roundOrder.removeFirst())
+                let oldest = _roundOrder.removeFirst()
+                _roundUploads.removeValue(forKey: oldest)
+                _roundFallbackUsed.remove(oldest)
             }
         }
     }
 
-    private static func roundUpload(forFileName name: String) -> RoundVideoUpload? {
-        return roundQueue.sync { _roundUploads[name] }
+    private static func roundUpload(forNames names: [String],
+                                    mimeType: String) -> RoundVideoUpload? {
+        return roundQueue.sync {
+            // Exact file names always win, even when the UI toggle has already
+            // reset for the next preview.
+            for name in names {
+                if let item = _roundUploads[name] { return item }
+            }
+
+            // Some Telegram forks upload with a generic InputFile.name and
+            // omit documentAttributeFilename. Only consume a fallback if ONE
+            // round export is outstanding and its type matches a video file.
+            let type = mimeType.lowercased()
+            let looksLikeVideo = type.hasPrefix("video/") ||
+                (type == "application/octet-stream" &&
+                 UserDefaults.standard.bool(forKey: "MxVideoToNote"))
+            guard looksLikeVideo else { return nil }
+            let now = Date().timeIntervalSince1970
+            let candidates = _roundOrder.filter {
+                guard let item = _roundUploads[$0] else { return false }
+                return now - item.registeredAt < 180 &&
+                       !_roundFallbackUsed.contains($0)
+            }
+            guard candidates.count == 1, let name = candidates.first,
+                  let item = _roundUploads[name] else { return nil }
+            _roundFallbackUsed.insert(name)
+            return item
+        }
     }
 
     private struct VoiceUpload {
         let duration: Int32
         let waveform: Data?
+        let registeredAt: TimeInterval
     }
 
-    private static let voiceQueue = DispatchQueue(label: "com.mx.voiceUploads",
-                                                  attributes: .concurrent)
+    private static let voiceQueue = DispatchQueue(label: "com.mx.voiceUploads")
     private static var _voiceUploads = [String: VoiceUpload]()
     private static var _voiceOrder = [String]()
+    private static var _voiceFallbackUsed = Set<String>()
 
     @objc static func registerVoiceUpload(withFileName fileName: String,
                                           duration: Int,
                                           waveform: NSData?) {
         guard !fileName.isEmpty else { return }
         let entry = VoiceUpload(duration: Int32(max(1, duration)),
-                                waveform: waveform as Data?)
-        voiceQueue.async(flags: .barrier) {
+                                waveform: waveform as Data?,
+                                registeredAt: Date().timeIntervalSince1970)
+        // Must complete registration before TGMediaAssetsController returns
+        // the file description. An asynchronous barrier raced the MTProto send.
+        voiceQueue.sync {
             if _voiceUploads[fileName] == nil { _voiceOrder.append(fileName) }
             _voiceUploads[fileName] = entry
-            // A send can be retried long after it was queued, so entries are
-            // kept for a while rather than consumed on first use.
+            _voiceFallbackUsed.remove(fileName)
             while _voiceOrder.count > 32 {
-                _voiceUploads.removeValue(forKey: _voiceOrder.removeFirst())
+                let oldest = _voiceOrder.removeFirst()
+                _voiceUploads.removeValue(forKey: oldest)
+                _voiceFallbackUsed.remove(oldest)
             }
         }
     }
 
-    private static func voiceUpload(forFileName name: String) -> VoiceUpload? {
-        var result: VoiceUpload?
-        voiceQueue.sync { result = _voiceUploads[name] }
-        return result
+    private static func voiceUpload(forNames names: [String],
+                                    mimeType: String) -> VoiceUpload? {
+        return voiceQueue.sync {
+            for name in names {
+                if let item = _voiceUploads[name] { return item }
+            }
+            let type = mimeType.lowercased()
+            let looksLikeAudio = type.hasPrefix("audio/") ||
+                (type == "application/octet-stream" &&
+                 UserDefaults.standard.bool(forKey: "MxVideoToVoice"))
+            guard looksLikeAudio else { return nil }
+            let now = Date().timeIntervalSince1970
+            let candidates = _voiceOrder.filter {
+                guard let item = _voiceUploads[$0] else { return false }
+                return now - item.registeredAt < 180 &&
+                       !_voiceFallbackUsed.contains($0)
+            }
+            guard candidates.count == 1, let name = candidates.first,
+                  let item = _voiceUploads[name] else { return nil }
+            _voiceFallbackUsed.insert(name)
+            return item
+        }
     }
 
     /// Packs 0…31 amplitudes into the five-bits-per-sample bitstream Telegram
@@ -2456,17 +2513,32 @@ class TLParser: NSObject {
             }
         }
 
-        var newAttributes: [Api.DocumentAttribute]?
+        var inputName: String?
+        switch data.file {
+        case let .inputFile(fileData):
+            inputName = fileData.name
+        case let .inputFileBig(fileData):
+            inputName = fileData.name
+        default:
+            break
+        }
 
-        if let name = fileName, let round = roundUpload(forFileName: name) {
-            // Video Note: 640x640 H.264 MP4 with a real Telegram round-video flag.
-            diag("v2note wire: \(name) -> round video, \(round.duration)s")
+        let names = [fileName, inputName].compactMap { $0 }.filter { !$0.isEmpty }
+        var newAttributes: [Api.DocumentAttribute]?
+        var newMimeType = data.mimeType
+
+        if let round = roundUpload(forNames: names, mimeType: data.mimeType) {
+            // Telegram recognizes Video Notes from documentAttributeVideo bit 0,
+            // not from a circular visual crop or a filename.
+            diag("v2note wire: \(names) -> round video, \(round.duration)s")
             newAttributes = [roundVideoAttribute(round)]
-        } else if let name = fileName, let upload = voiceUpload(forFileName: name) {
-            // Video to Voice: we extracted this file ourselves, so we know both
-            // how long it runs and what it looks like.
-            diag("v2v wire: \(name) -> voice, \(upload.duration)s")
+            newMimeType = "video/mp4"
+        } else if let upload = voiceUpload(forNames: names, mimeType: data.mimeType) {
+            // Telegram recognizes a real voice message from bit 10 of
+            // documentAttributeAudio; leave other file uploads unchanged.
+            diag("v2v wire: \(names) -> voice, \(upload.duration)s")
             newAttributes = [voiceAttribute(upload)]
+            newMimeType = "audio/mp4"
         } else if UserDefaults.standard.bool(forKey: "MxSendAsVoice"),
                   let audio = existingAudio,
                   (Int(audio.flags) & (1 << 10)) == 0 {
@@ -2491,10 +2563,13 @@ class TLParser: NSObject {
 
         return Api.InputMedia.inputMediaUploadedDocument(
             Api.InputMedia.Cons_inputMediaUploadedDocument(
-                flags: data.flags,
+                // TGMediaAssetsController's "file" branch sets force_file
+                // (bit 4), which overrides voice/round rendering. Clear it
+                // only for a conversion we positively recognized above.
+                flags: data.flags & ~(1 << 4),
                 file: data.file,
                 thumb: data.thumb,
-                mimeType: data.mimeType,
+                mimeType: newMimeType,
                 attributes: attributes,
                 stickers: data.stickers,
                 videoCover: data.videoCover,
@@ -2550,8 +2625,11 @@ class TLParser: NSObject {
     /// cannot be corrupted by it.
     @objc static func rewriteVoiceUpload(_ data: NSData) -> NSData? {
         let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: "MxVideoToVoice") ||
-              defaults.bool(forKey: "MxVideoToNote") ||
+        // A media transfer can remain queued after the preview selection
+        // resets. Registered uploads must still be detected on retry.
+        let hasPendingVoice = voiceQueue.sync { !_voiceUploads.isEmpty }
+        let hasPendingRound = roundQueue.sync { !_roundUploads.isEmpty }
+        guard hasPendingVoice || hasPendingRound ||
               defaults.bool(forKey: "MxSendAsVoice") else { return nil }
 
         let payload = data as Data
