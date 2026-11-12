@@ -558,79 +558,10 @@ void showUI() {
 // 
 
 
+// The original first-launch modal promoted an external channel and blocked the host UI.
+// The customized build intentionally never presents it.
 static void showWelcomeAlertIfNeeded() {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    if ([defaults boolForKey:@"MxWelcomeShown"]) return;
-
-    UIWindow *window = UIApplication.sharedApplication.keyWindow;
-    UIViewController *rootVC = window.rootViewController;
-    if (!rootVC) return;
-
-    // Spelling out the row by name, in the host's own language, because this is
-    // the only screen that tells a new user how to get in at all — and the way
-    // in is not the same in every client.
-    //
-    // What this used to say was wrong twice over: it named a shield button in
-    // the navigation bar that has been commented out for as long as this alert
-    // has existed, and it named the "Ask a Question" row in English on hosts
-    // that neither render it in English nor respond to it.
-    // The sentence comes from Mx's own translations; the row name inside it
-    // comes from the host's, because that is the string the user has in front
-    // of them. Mixing the two on purpose is the point — a row named in a
-    // language that is not on screen is worse than no name at all.
-    NSString *howTo;
-    if (mxHostBundleIs(@"com.olcorporation.olai")) {
-        // iMe answers a long press on its Support row with a context menu of its
-        // own, built on a UIContextMenuInteraction that cannot be made to yield.
-        // The gift row carries no such menu, so it is the way in here.
-        //
-        // Two substitutions, gift row first: every translation of this key was
-        // written to that order.
-        howTo = [NSString stringWithFormat:MxLoc(@"WELCOME_HOWTO_IME"),
-            mxLocalizedRowName(@"Settings.SendGift", @"Send a Gift"),
-            mxLocalizedRowName(@"Settings.Support", @"Ask a Question")];
-    } else if (mxHostBundleIs(@"com.seastar.turrit")) {
-        // Turrit renames the row after itself and keeps the brand in Latin
-        // script in every localisation, Chinese included (关于Turrit), so this
-        // one carries no substitution at all.
-        howTo = MxLoc(@"WELCOME_HOWTO_TURRIT");
-    } else {
-        howTo = [NSString stringWithFormat:MxLoc(@"WELCOME_HOWTO"),
-            mxLocalizedRowName(@"Settings.Support", @"Ask a Question")];
-    }
-
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:@"Mx"
-        message:[NSString stringWithFormat:MxLoc(@"WELCOME_BODY"), howTo]
-        preferredStyle:UIAlertControllerStyleAlert];
-
-    void (^markShown)(void) = ^{
-        [defaults setBool:YES forKey:@"MxWelcomeShown"];
-        [defaults synchronize];
-    };
-
-    UIAlertAction *channelAction = [UIAlertAction
-        actionWithTitle:MxLoc(@"WELCOME_JOIN_CHANNEL")
-                  style:UIAlertActionStyleDefault
-                handler:^(UIAlertAction *action) {
-        markShown();
-        NSURL *url = [NSURL URLWithString:kMxChannelURL];
-        if ([[UIApplication sharedApplication] canOpenURL:url]) {
-            [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-        }
-    }];
-
-    UIAlertAction *okAction = [UIAlertAction
-        actionWithTitle:MxLoc(@"OK")
-                  style:UIAlertActionStyleCancel
-                handler:^(UIAlertAction *action) {
-        markShown();
-    }];
-
-    [alert addAction:channelAction];
-    [alert addAction:okAction];
-
-    [rootVC presentViewController:alert animated:YES completion:nil];
+    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"MxWelcomeShown"];
 }
 
 #import "../Headers.h"
@@ -678,7 +609,8 @@ static BOOL injectBadgeToNode(ASDisplayNode *textNode, ASDisplayNode *headerNode
         } else {
             NSNumber *currId = [NSClassFromString(@"TLParser") performSelector:@selector(getCurrentUserId)];
             if (currId && [currId longLongValue] == peerId) {
-                prefix = @"✨ Mx User";
+                prefix = @"by iKiraPlus";
+                badgeColor = [UIColor colorWithRed:0.88 green:0.10 blue:0.15 alpha:1.0]; // Kira red
             }
         }
         
@@ -704,21 +636,28 @@ static BOOL injectBadgeToNode(ASDisplayNode *textNode, ASDisplayNode *headerNode
         badge.text = [NSString stringWithFormat:@" %@ ", prefix];
         [badge sizeToFit];
         
-        CGRect textFrame = [textNode.view convertRect:textNode.view.bounds toView:headerNode.view];
-        if (textFrame.size.width > 0) {
-            badge.frame = CGRectMake(textFrame.origin.x + textFrame.size.width + 6, 
-                                     textFrame.origin.y + (textFrame.size.height - badge.frame.size.height) / 2.0, 
-                                     badge.frame.size.width, badge.frame.size.height);
-        } else {
-            badge.frame = CGRectMake(headerNode.view.frame.size.width - badge.frame.size.width - 15, 45, badge.frame.size.width, badge.frame.size.height);
+        // Keep the badge fully within the profile header, even for long names,
+        // narrow devices and resized/rotated views. Never hide it for overflow.
+        badge.numberOfLines = 1;
+        badge.adjustsFontSizeToFitWidth = YES;
+        badge.minimumScaleFactor = 0.80;
+        CGRect bounds = headerNode.view.bounds;
+        CGRect nameFrame = [textNode.view convertRect:textNode.view.bounds toView:headerNode.view];
+        CGFloat badgeWidth = MIN(ceil(badge.bounds.size.width), MAX(1.0, bounds.size.width - 16.0));
+        CGFloat badgeHeight = MIN(ceil(badge.bounds.size.height), MAX(1.0, bounds.size.height - 8.0));
+        CGFloat x = CGRectGetMaxX(nameFrame) + 6.0;
+        CGFloat y = CGRectGetMidY(nameFrame) - badgeHeight / 2.0;
+        if (x + badgeWidth > CGRectGetMaxX(bounds) - 8.0) {
+            x = CGRectGetMaxX(bounds) - badgeWidth - 8.0;
+            if (CGRectIntersectsRect(CGRectMake(x, y, badgeWidth, badgeHeight), nameFrame)) {
+                y = CGRectGetMaxY(nameFrame) + 3.0;
+            }
         }
-        // Anything landing outside the header is a text node that is not laid
-        // out yet, or not on screen at all. Placing the badge there is what put
-        // it above the top edge; better to leave it for the next layout pass.
-        if (!CGRectContainsRect(headerNode.view.bounds, CGRectInset(badge.frame, -1, -1))) {
-            badge.hidden = YES;
-            return NO;
-        }
+        x = MAX(CGRectGetMinX(bounds) + 8.0,
+                MIN(x, CGRectGetMaxX(bounds) - badgeWidth - 8.0));
+        y = MAX(CGRectGetMinY(bounds) + 4.0,
+                MIN(y, CGRectGetMaxY(bounds) - badgeHeight - 4.0));
+        badge.frame = CGRectMake(x, y, badgeWidth, badgeHeight);
 
         badge.hidden = NO;
         [headerNode.view bringSubviewToFront:badge];
