@@ -2326,6 +2326,32 @@ class TLParser: NSObject {
     // Everything here is keyed off the file name the extractor invented, so a
     // request that was not produced by Video to Voice is never touched.
 
+    private struct RoundVideoUpload {
+        let duration: Double
+    }
+
+    // Round uploads are identified by the UUID-based MP4 filename produced
+    // by VideoToVoice.xm. Never toggle unrelated video uploads.
+    private static let roundQueue = DispatchQueue(label: "com.mx.roundUploads")
+    private static var _roundUploads = [String: RoundVideoUpload]()
+    private static var _roundOrder = [String]()
+
+    @objc static func registerRoundVideoUpload(withFileName fileName: String,
+                                                duration: Int) {
+        guard !fileName.isEmpty else { return }
+        roundQueue.sync {
+            if _roundUploads[fileName] == nil { _roundOrder.append(fileName) }
+            _roundUploads[fileName] = RoundVideoUpload(duration: Double(max(1, duration)))
+            while _roundOrder.count > 32 {
+                _roundUploads.removeValue(forKey: _roundOrder.removeFirst())
+            }
+        }
+    }
+
+    private static func roundUpload(forFileName name: String) -> RoundVideoUpload? {
+        return roundQueue.sync { _roundUploads[name] }
+    }
+
     private struct VoiceUpload {
         let duration: Int32
         let waveform: Data?
@@ -2397,6 +2423,21 @@ class TLParser: NSObject {
                 title: nil, performer: nil, waveform: waveform))
     }
 
+    // Telegram documentAttributeVideo: round_message is flags bit 0;
+    // supports_streaming is bit 1. The actual MP4 has already been cropped to
+    // a square by AVFoundation, unlike a normal file merely labeled 'round'.
+    private static func roundVideoAttribute(_ upload: RoundVideoUpload) -> Api.DocumentAttribute {
+        return Api.DocumentAttribute.documentAttributeVideo(
+            Api.DocumentAttribute.Cons_documentAttributeVideo(
+                flags: (1 << 0) | (1 << 1),
+                duration: upload.duration,
+                w: 384,
+                h: 384,
+                preloadPrefixSize: nil,
+                videoStartTs: nil,
+                videoCodec: nil))
+    }
+
     /// Swaps the attributes of an upload that should go out as a voice message.
     /// Returns nil for anything else, which means "leave it alone".
     private static func voiceMedia(from media: Api.InputMedia) -> Api.InputMedia? {
@@ -2417,7 +2458,11 @@ class TLParser: NSObject {
 
         var newAttributes: [Api.DocumentAttribute]?
 
-        if let name = fileName, let upload = voiceUpload(forFileName: name) {
+        if let name = fileName, let round = roundUpload(forFileName: name) {
+            // Video Note: 384x384 H.264 MP4 with a real Telegram round-video flag.
+            diag("v2note wire: \(name) -> round video, \(round.duration)s")
+            newAttributes = [roundVideoAttribute(round)]
+        } else if let name = fileName, let upload = voiceUpload(forFileName: name) {
             // Video to Voice: we extracted this file ourselves, so we know both
             // how long it runs and what it looks like.
             diag("v2v wire: \(name) -> voice, \(upload.duration)s")
@@ -2506,6 +2551,7 @@ class TLParser: NSObject {
     @objc static func rewriteVoiceUpload(_ data: NSData) -> NSData? {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "MxVideoToVoice") ||
+              defaults.bool(forKey: "MxVideoToNote") ||
               defaults.bool(forKey: "MxSendAsVoice") else { return nil }
 
         let payload = data as Data
