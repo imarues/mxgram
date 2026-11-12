@@ -256,6 +256,8 @@ static void updateMxEditBadge(ASDisplayNode *node, NSNumber *msgId, NSNumber *pe
 // skipped them.
 
 static BOOL _mxGestureAttached = NO;
+static BOOL _mxTapAttached = NO;
+static const void *kMxSupportTapAssociation = &kMxSupportTapAssociation;
 
 // Helper target object for late-attached gestures
 @interface MxGestureTarget : NSObject
@@ -263,6 +265,9 @@ static BOOL _mxGestureAttached = NO;
 @implementation MxGestureTarget
 - (void)handleLongPress:(UILongPressGestureRecognizer *)gr {
     if (gr.state == UIGestureRecognizerStateBegan) showUI();
+}
+- (void)handleTap:(UITapGestureRecognizer *)gr {
+    if (gr.state == UIGestureRecognizerStateEnded) showUI();
 }
 @end
 static MxGestureTarget *_mxGestureTarget = nil;
@@ -272,7 +277,7 @@ static void tryAttachMxGesture(void);
 %hook TGLocalization
 - (id)get:(id)key {
     TGLocalizationShared = self;
-    if (!_mxGestureAttached) {
+    if (!_mxGestureAttached || !_mxTapAttached) {
         dispatch_async(dispatch_get_main_queue(), ^{
             tryAttachMxGesture();
         });
@@ -285,7 +290,7 @@ static void tryAttachMxGesture(void);
     if (instance) {
         TGLocalizationShared = instance;
         // Settings may already be rendered — try to attach gesture now
-        if (!_mxGestureAttached) {
+        if (!_mxGestureAttached || !_mxTapAttached) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 tryAttachMxGesture();
             });
@@ -300,50 +305,81 @@ static void tryAttachMxGestureInView(UIView *view) {
     if ([NSStringFromClass([view class]) isEqualToString:@"Display.AccessibilityAreaNode"]) {
         NSString *label = view.accessibilityLabel;
         if (mxLabelIsSupportRow(label)) {
-            UIView *parent = view.superview;
-            if (parent) {
-                BOOL alreadyHas = NO;
-                for (UIGestureRecognizer *g in parent.gestureRecognizers) {
-                    if ([g isKindOfClass:[UILongPressGestureRecognizer class]]) {
-                        alreadyHas = YES; break;
-                    }
-                }
-                if (!alreadyHas) {
-                    if (!_mxGestureTarget) _mxGestureTarget = [MxGestureTarget new];
-                    UILongPressGestureRecognizer *gr = [[UILongPressGestureRecognizer alloc]
-                        initWithTarget:_mxGestureTarget action:@selector(handleLongPress:)];
-                    [parent addGestureRecognizer:gr];
-                    _mxGestureAttached = YES;
-                    customLog2(@"[Mx] late-attach OK: %@", label);
+            UIView *parent = view.superview ?: view;
+            if (!_mxGestureTarget) _mxGestureTarget = [MxGestureTarget new];
+            // The normal support-row tap must open Mx. A long press is still
+            // accepted as a fallback, but it is no longer the only way in.
+            if (!objc_getAssociatedObject(parent, kMxSupportTapAssociation)) {
+                UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
+                    initWithTarget:_mxGestureTarget action:@selector(handleTap:)];
+                tap.numberOfTapsRequired = 1;
+                tap.cancelsTouchesInView = YES;
+                [parent addGestureRecognizer:tap];
+                objc_setAssociatedObject(parent, kMxSupportTapAssociation, tap,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            _mxTapAttached = YES;
+            BOOL alreadyHas = NO;
+            for (UIGestureRecognizer *g in parent.gestureRecognizers) {
+                if ([g isKindOfClass:[UILongPressGestureRecognizer class]]) {
+                    alreadyHas = YES; break;
                 }
             }
+            if (!alreadyHas) {
+                UILongPressGestureRecognizer *gr = [[UILongPressGestureRecognizer alloc]
+                    initWithTarget:_mxGestureTarget action:@selector(handleLongPress:)];
+                gr.cancelsTouchesInView = NO;
+                [parent addGestureRecognizer:gr];
+            }
+            _mxGestureAttached = YES;
+            mxDiag("Mx support row tap/long-press attached (late): %{public}s",
+                   label.UTF8String);
         }
         return;
     }
     for (UIView *sub in view.subviews) {
         tryAttachMxGestureInView(sub);
-        if (_mxGestureAttached) return;
+        if (_mxGestureAttached && _mxTapAttached) return;
     }
 }
 
 static void tryAttachMxGesture(void) {
-    if (_mxGestureAttached) return;
+    if (_mxGestureAttached && _mxTapAttached) return;
     UIWindow *window = UIApplication.sharedApplication.keyWindow;
     if (window) tryAttachMxGestureInView(window);
 }
 
 void showUI() {
-	// Attaching the gesture and the menu actually appearing are two different
-	// claims, and only the first one used to leave a trace.
-	mxDiag("showUI called");
-	Mx *ui = [Mx new];
-	UINavigationController *navVC = [[UINavigationController alloc] initWithRootViewController:ui];
-
-	UIWindow *window = UIApplication.sharedApplication.keyWindow;
-	UIViewController *rootVC = window.rootViewController;
-	if (rootVC) {
-	    [rootVC presentViewController:navVC animated:YES completion:nil];
-	}
+    // Settings can be behind an already-presented controller. Presenting on
+    // window.rootViewController then silently fails with a UIKit warning.
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ showUI(); });
+        return;
+    }
+    UIWindow *window = UIApplication.sharedApplication.keyWindow;
+    if (!window) {
+        for (UIWindow *candidate in UIApplication.sharedApplication.windows) {
+            if (!candidate.hidden && candidate.windowLevel == UIWindowLevelNormal) {
+                window = candidate;
+                break;
+            }
+        }
+    }
+    UIViewController *presenter = window.rootViewController;
+    while (presenter.presentedViewController) {
+        presenter = presenter.presentedViewController;
+    }
+    if (!presenter || presenter.isBeingDismissed) return;
+    if ([presenter isKindOfClass:[Mx class]]) return;
+    if ([presenter isKindOfClass:[UINavigationController class]]) {
+        UIViewController *top = ((UINavigationController *)presenter).topViewController;
+        if ([top isKindOfClass:[Mx class]]) return;
+    }
+    UINavigationController *navVC = [[UINavigationController alloc]
+        initWithRootViewController:[Mx new]];
+    mxDiag("Opening Mx from support row on %{public}s",
+           NSStringFromClass([presenter class]).UTF8String);
+    [presenter presentViewController:navVC animated:YES completion:nil];
 }
 
 
@@ -412,6 +448,18 @@ void showUI() {
     }
 
     UIView *pv = parent.view;
+    if (pv && !objc_getAssociatedObject(pv, kMxSupportTapAssociation)) {
+        if (!_mxGestureTarget) _mxGestureTarget = [MxGestureTarget new];
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
+            initWithTarget:_mxGestureTarget action:@selector(handleTap:)];
+        tap.numberOfTapsRequired = 1;
+        tap.cancelsTouchesInView = YES;
+        [pv addGestureRecognizer:tap];
+        objc_setAssociatedObject(pv, kMxSupportTapAssociation, tap,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        _mxTapAttached = YES;
+        mxDiag("MX direct tap attached: %{public}s", label.UTF8String);
+    }
     if (pv && ![pv.gestureRecognizers containsObject:parent.mxLongPressGesture]) {
         // The row usually long-presses into a context menu of its own. Two
         // recognizers watching the same gesture means the host's wins and ours
