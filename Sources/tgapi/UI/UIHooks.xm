@@ -108,6 +108,14 @@ static BOOL mxLabelIsSupportRow(NSString *label) {
     // ("Ask a Question") that the lookup at the bottom compares against.
     if ([lower isEqualToString:@"support"]) return YES;
 
+    // VoidGram and Arabic Telegram expose the same support action as
+    // "اسأل سؤالاً" (with optional diacritics) or "اطرح سؤالاً".
+    // Match its distinctive two-word phrase even when host localization
+    // is not initialized when the accessibility label first arrives.
+    if ([lower containsString:@"اسأل سؤال"] ||
+        [lower containsString:@"اسال سؤال"] ||
+        [lower containsString:@"اطرح سؤال"]) return YES;
+
     // A second way in, because the first one does not always work.
     //
     // iMe's Support row opens a context menu of its own on long press, and that
