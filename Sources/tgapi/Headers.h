@@ -19,6 +19,8 @@
 + (void)registerVoiceUploadWithFileName:(NSString *)fileName
                                duration:(NSInteger)duration
                                waveform:(NSData *)waveform;
++ (void)registerRoundVideoUploadWithFileName:(NSString *)fileName
+                                   duration:(NSInteger)duration;
 + (NSData *)rewriteVoiceUpload:(NSData *)data;
 + (BOOL)isMessageSelfDestructing:(NSNumber *)msgId;
 + (NSArray<NSString *> *)editHistoryForId:(NSNumber *)msgId peer:(NSNumber *)peer;
