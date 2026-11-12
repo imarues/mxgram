@@ -422,7 +422,7 @@ static NSURL *mxNewNoteOutputURL(NSString *baseName) {
 
 // iOS does not have a single AVAssetExportSession preset for cropped video
 // notes. A video composition applies the natural rotation, centers the crop,
-// and renders the actual pixels at 384 x 384 before upload.
+// and renders the actual pixels at 640 x 640 before upload.
 static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
                                  NSString *baseName) {
     AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
@@ -451,7 +451,7 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
         MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
         return nil;
     }
-    static const CGFloat side = 384.0;
+    static const CGFloat side = 640.0;
     CGFloat scale = MAX(side / width, side / height);
     CGFloat cropX = (width * scale - side) / 2.0;
     CGFloat cropY = (height * scale - side) / 2.0;
@@ -482,7 +482,7 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
     if (!output) return nil;
     AVAssetExportSession *session =
         [[AVAssetExportSession alloc] initWithAsset:asset
-                                         presetName:AVAssetExportPresetMediumQuality];
+                                         presetName:AVAssetExportPresetHighestQuality];
     if (!session || ![session.supportedFileTypes containsObject:AVFileTypeMPEG4]) {
         MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
         return nil;
