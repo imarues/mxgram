@@ -945,7 +945,6 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       cell.detailTextLabel.text = TGLoc(@"FIX_FILE_PICKER_SUBTITLE");
       UISwitch *toggle = (UISwitch *)cell.accessoryView;
       if (!toggle || ![toggle isKindOfClass:[UISwitch class]]) toggle = [[UISwitch alloc] init];
-      NSString *switchKey = [self switchKeyForIndexPath:indexPath];
       // The sideload file-picker fix is permanently active.
       toggle.on = YES;
       toggle.enabled = NO;
