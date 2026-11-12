@@ -18,6 +18,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 #import <Photos/Photos.h>
+#import <math.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
