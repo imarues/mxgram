@@ -1,0 +1,46 @@
+name: Build Mx Dylib (Source Check)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Sources/**'
+      - 'Mx.bundle/**'
+      - 'Makefile'
+      - '.github/workflows/ci-dylib.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Theos and iOS SDK
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'waruhachi/theos'
+          theos-branch: 'main'
+          sdks-src: 'waruhachi/sdks'
+          sdks-branch: 'main'
+
+      - name: Compile Mx for sideload injection
+        shell: bash
+        run: make clean package FINALPACKAGE=1 STRIP=0
+
+      - name: Upload Mx.dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mx-iKiraPlus-dylib
+          path: packages/Mx.dylib
+          if-no-files-found: error
+
+      - name: Upload tweak packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mx-iKiraPlus-deb
+          path: packages/*.deb
+          if-no-files-found: error
