@@ -156,6 +156,11 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
       @"VIDEO_TO_VOICE_SUCCESS" : @"الصوت جاهز — جارٍ الإرسال",
       @"VIDEO_TO_VOICE_FAILED" : @"تعذّر استخراج الصوت — سيُرسل الفيديو بدلًا منه",
       @"VIDEO_TO_VOICE_NO_AUDIO" : @"هذا الفيديو بلا صوت — سيُرسل الفيديو بدلًا منه",
+      @"VIDEO_TO_NOTE_ON_TOAST" : @"سيُرسل هذا الفيديو كفيديو دائري (فيديو نوت)",
+      @"VIDEO_TO_NOTE_OFF_TOAST" : @"سيُرسل كفيديو عادي مجددًا",
+      @"VIDEO_TO_NOTE_CONVERTING" : @"جارٍ تحويل الفيديو إلى فيديو دائري…",
+      @"VIDEO_TO_NOTE_SUCCESS" : @"الفيديو الدائري جاهز — جارٍ الإرسال",
+      @"VIDEO_TO_NOTE_FAILED" : @"تعذّر تحويل الفيديو — سيُرسل الفيديو الأصلي بدلًا منه",
     };
   }
   if ([code isEqualToString:@"ja"]) {
@@ -507,6 +512,11 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
       @"VIDEO_TO_VOICE_SUCCESS" : @"Audio ready — sending",
       @"VIDEO_TO_VOICE_FAILED" : @"Could not extract audio — sending the video instead",
       @"VIDEO_TO_VOICE_NO_AUDIO" : @"This video has no sound — sending the video instead",
+      @"VIDEO_TO_NOTE_ON_TOAST" : @"This video will be sent as a circular video note",
+      @"VIDEO_TO_NOTE_OFF_TOAST" : @"Sending as a normal video again",
+      @"VIDEO_TO_NOTE_CONVERTING" : @"Converting video to a round video note…",
+      @"VIDEO_TO_NOTE_SUCCESS" : @"Round video ready — sending",
+      @"VIDEO_TO_NOTE_FAILED" : @"Could not convert video — sending the original video instead",
     };
   }
   if ([code isEqualToString:@"es"]) {
