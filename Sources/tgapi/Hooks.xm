@@ -52,7 +52,7 @@ static BOOL mxNeedsResponsePatching(void) {
       functionID == kMessagesUploadMedia) {
     NSData *asVoice = [TLParser rewriteVoiceUpload:payload];
     if (asVoice) {
-      customLog2(@"[Mx] v2v: rewrote outgoing media as voice");
+      customLog2(@"[Mx] rewrote outgoing media as voice or round video note");
       payload = asVoice;
     }
   }
