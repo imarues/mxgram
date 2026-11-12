@@ -59,6 +59,10 @@ static BOOL mxVideoToVoiceEnabled(void) {
     return [[NSUserDefaults standardUserDefaults] boolForKey:kVideoToVoice];
 }
 
+static BOOL mxVideoToNoteEnabled(void) {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kVideoToNote];
+}
+
 static NSString *mxVoiceCacheRoot(void) {
     return [NSTemporaryDirectory() stringByAppendingPathComponent:@"MxVideoToVoice"];
 }
@@ -390,6 +394,165 @@ static NSDictionary *mxRewriteToVoice(id anyDict, id editingContext) {
     return rewritten;
 }
 
+// ------------------------------------------------------------
+// Video to Video Note: convert to a square H.264 MP4, then tag the
+// outgoing uploaded document with Telegram's round_message video flag.
+// This is a *real* Telegram video note, not a circular-looking preview.
+// ------------------------------------------------------------
+static NSString *mxNoteCacheRoot(void) {
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"MxVideoNotes"];
+}
+
+static NSURL *mxNewNoteOutputURL(NSString *baseName) {
+    NSString *dir = [mxNoteCacheRoot()
+        stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]];
+    if (![[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                 withIntermediateDirectories:YES
+                                                  attributes:nil
+                                                       error:nil]) {
+        return nil;
+    }
+    NSString *stem = [baseName isKindOfClass:[NSString class]] && baseName.length
+        ? [baseName stringByDeletingPathExtension] : @"video";
+    NSString *name = [NSString stringWithFormat:@"mxnote_%@_%@.mp4",
+        stem, [[NSUUID UUID] UUIDString]];
+    return [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]];
+}
+
+// iOS does not have a single AVAssetExportSession preset for cropped video
+// notes. A video composition applies the natural rotation, centers the crop,
+// and renders the actual pixels at 384 x 384 before upload.
+static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
+                                 NSString *baseName) {
+    AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
+    if (!track) {
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+
+    NSTimeInterval originalLength = CMTimeGetSeconds(selectedRange.duration);
+    if (!isfinite(originalLength) || originalLength <= 0.0) {
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+    // Telegram limits round video messages to 60 seconds. Respect the chosen
+    // preview trim range first, then cap the exported segment to 60 seconds.
+    CMTimeRange range = selectedRange;
+    if (originalLength > 60.0) {
+        range.duration = CMTimeMakeWithSeconds(60.0, 600);
+    }
+
+    CGRect original = CGRectMake(0, 0, track.naturalSize.width, track.naturalSize.height);
+    CGRect oriented = CGRectApplyAffineTransform(original, track.preferredTransform);
+    CGFloat width = fabs(oriented.size.width);
+    CGFloat height = fabs(oriented.size.height);
+    if (!isfinite(width) || !isfinite(height) || width < 1.0 || height < 1.0) {
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+    static const CGFloat side = 384.0;
+    CGFloat scale = MAX(side / width, side / height);
+    CGFloat cropX = (width * scale - side) / 2.0;
+    CGFloat cropY = (height * scale - side) / 2.0;
+
+    // The preferred transform handles all four device orientations. Normalize
+    // its transformed bounding box to (0,0), then scale and center-crop.
+    CGAffineTransform t = track.preferredTransform;
+    t.tx -= CGRectGetMinX(oriented);
+    t.ty -= CGRectGetMinY(oriented);
+    t.a *= scale; t.b *= scale; t.c *= scale; t.d *= scale;
+    t.tx = t.tx * scale - cropX;
+    t.ty = t.ty * scale - cropY;
+
+    AVMutableVideoCompositionLayerInstruction *layer =
+        [AVMutableVideoCompositionLayerInstruction videoCompositionLayerInstructionWithAssetTrack:track];
+    [layer setTransform:t atTime:kCMTimeZero];
+    AVMutableVideoCompositionInstruction *instruction =
+        [AVMutableVideoCompositionInstruction videoCompositionInstruction];
+    instruction.timeRange = CMTimeRangeMake(kCMTimeZero, asset.duration);
+    instruction.layerInstructions = @[layer];
+
+    AVMutableVideoComposition *composition = [AVMutableVideoComposition videoComposition];
+    composition.renderSize = CGSizeMake(side, side);
+    composition.frameDuration = CMTimeMake(1, 30);
+    composition.instructions = @[instruction];
+
+    NSURL *output = mxNewNoteOutputURL(baseName);
+    if (!output) return nil;
+    AVAssetExportSession *session =
+        [[AVAssetExportSession alloc] initWithAsset:asset
+                                         presetName:AVAssetExportPresetMediumQuality];
+    if (!session || ![session.supportedFileTypes containsObject:AVFileTypeMPEG4]) {
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+    session.outputURL = output;
+    session.outputFileType = AVFileTypeMPEG4;
+    session.videoComposition = composition;
+    session.timeRange = range;
+    session.shouldOptimizeForNetworkUse = YES;
+
+    MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_CONVERTING"]);
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [session exportAsynchronouslyWithCompletionHandler:^{
+        dispatch_semaphore_signal(done);
+    }];
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+            (int64_t)(kMxExtractionTimeout * NSEC_PER_SEC))) != 0) {
+        [session cancelExport];
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+    if (session.status != AVAssetExportSessionStatusCompleted) {
+        mxDiag("v2note: export failed status=%ld error=%{public}s",
+            (long)session.status, session.error.localizedDescription.UTF8String ?: "unknown");
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
+        return nil;
+    }
+
+    AVURLAsset *exported = [AVURLAsset URLAssetWithURL:output options:nil];
+    NSInteger duration = MAX(1, (NSInteger)llround(CMTimeGetSeconds(exported.duration)));
+    // Register synchronously, so the MTProto hook cannot race the upload.
+    [TLParser registerRoundVideoUploadWithFileName:output.lastPathComponent
+                                          duration:duration];
+    mxDiag("v2note: registered %{public}s duration=%ld",
+        output.lastPathComponent.UTF8String, (long)duration);
+    MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_SUCCESS"]);
+    return output;
+}
+
+static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext) {
+    if (![anyDict isKindOfClass:[NSDictionary class]]) return nil;
+    NSDictionary *dict = anyDict;
+    NSString *type = dict[@"type"];
+    if (![type isKindOfClass:[NSString class]] ||
+        !([type isEqualToString:@"video"] || [type isEqualToString:@"cameraVideo"])) {
+        return nil;
+    }
+    AVAsset *asset = mxResolveAVAsset(dict);
+    if (!asset) return nil;
+    id item = dict[@"asset"];
+    CMTimeRange range = mxTrimRange(editingContext, item, asset);
+    NSString *baseName = nil;
+    if ([item respondsToSelector:@selector(fileName)]) baseName = [item fileName];
+    if (!baseName.length) baseName = dict[@"fileName"];
+
+    NSURL *output = mxExportRoundVideo(asset, range, baseName);
+    if (!output) return nil; // On failure Telegram sends the original video.
+
+    NSMutableDictionary *rewritten = [dict mutableCopy];
+    rewritten[@"type"] = @"file";
+    rewritten[@"tempFileUrl"] = output;
+    rewritten[@"mimeType"] = @"video/mp4";
+    rewritten[@"fileName"] = output.lastPathComponent;
+    for (NSString *key in @[@"asset", @"adjustments", @"isAnimation",
+                            @"document", @"url", @"dimensions", @"duration",
+                            @"coverImage"]) {
+        [rewritten removeObjectForKey:key];
+    }
+    return rewritten;
+}
+
 // ============================================================
 // The toggle, in the video preview itself.
 //
@@ -404,6 +567,7 @@ static NSDictionary *mxRewriteToVoice(id anyDict, id editingContext) {
 // ============================================================
 
 #define kMxVoiceButtonTag 8877
+#define kMxNoteButtonTag 8878
 static const CGFloat kMxVoiceButtonSide = 40.0;
 
 static const void *kMxItemIsVideoKey = &kMxItemIsVideoKey;
@@ -434,6 +598,19 @@ static void mxStyleVoiceButton(UIButton *button, BOOL enabled) {
                                      : [UIColor colorWithWhite:0.0 alpha:0.5];
 }
 
+static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
+    if (!button) return;
+    UIImage *icon = [UIImage systemImageNamed:@"video.circle"];
+    UIImageSymbolConfiguration *cfg =
+        [UIImageSymbolConfiguration configurationWithPointSize:21
+                                                        weight:UIImageSymbolWeightSemibold];
+    if (cfg && icon) icon = [icon imageByApplyingSymbolConfiguration:cfg];
+    [button setImage:icon forState:UIControlStateNormal];
+    button.tintColor = [UIColor whiteColor];
+    button.backgroundColor = enabled ? [UIColor systemBlueColor]
+                                     : [UIColor colorWithWhite:0.0 alpha:0.5];
+}
+
 @interface MxVoiceToggleTarget : NSObject
 + (instancetype)shared;
 @end
@@ -451,12 +628,29 @@ static void mxStyleVoiceButton(UIButton *button, BOOL enabled) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     BOOL enabled = ![defaults boolForKey:kVideoToVoice];
     [defaults setBool:enabled forKey:kVideoToVoice];
+    [defaults setBool:NO forKey:kVideoToNote];
     mxStyleVoiceButton(sender, enabled);
+    mxStyleNoteButton((UIButton *)[sender.superview viewWithTag:kMxNoteButtonTag], NO);
     mxDiag("v2v: preview toggle -> %d", enabled);
 
     MxShowToast([MxLocalization localizedStringForKey:
         enabled ? @"VIDEO_TO_VOICE_ON_TOAST" : @"VIDEO_TO_VOICE_OFF_TOAST"]);
 
+    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc]
+        initWithStyle:UIImpactFeedbackStyleMedium];
+    [haptic impactOccurred];
+}
+
+// Second button immediately under the existing waveform button.
+- (void)handleNoteTap:(UIButton *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = ![defaults boolForKey:kVideoToNote];
+    [defaults setBool:enabled forKey:kVideoToNote];
+    [defaults setBool:NO forKey:kVideoToVoice];
+    mxStyleNoteButton(sender, enabled);
+    mxStyleVoiceButton((UIButton *)[sender.superview viewWithTag:kMxVoiceButtonTag], NO);
+    MxShowToast([MxLocalization localizedStringForKey:
+        enabled ? @"VIDEO_TO_NOTE_ON_TOAST" : @"VIDEO_TO_NOTE_OFF_TOAST"]);
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc]
         initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
@@ -536,9 +730,11 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
 
     BOOL isVideo = [objc_getAssociatedObject(interfaceView, kMxItemIsVideoKey) boolValue];
     UIButton *button = (UIButton *)[interfaceView viewWithTag:kMxVoiceButtonTag];
+    UIButton *noteButton = (UIButton *)[interfaceView viewWithTag:kMxNoteButtonTag];
 
     if (!isVideo) {
         button.hidden = YES;
+        noteButton.hidden = YES;
         return;
     }
 
@@ -553,10 +749,33 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
         [interfaceView addSubview:button];
     }
 
+    if (!noteButton) {
+        noteButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        noteButton.tag = kMxNoteButtonTag;
+        noteButton.layer.cornerRadius = kMxVoiceButtonSide / 2.0;
+        noteButton.clipsToBounds = YES;
+        noteButton.accessibilityLabel = @"Send as circular video note";
+        [noteButton addTarget:[MxVoiceToggleTarget shared]
+                       action:@selector(handleNoteTap:)
+             forControlEvents:UIControlEventTouchUpInside];
+        [interfaceView addSubview:noteButton];
+    }
+
     button.hidden = NO;
+    noteButton.hidden = NO;
     mxStyleVoiceButton(button, mxVideoToVoiceEnabled());
-    button.frame = mxVoiceButtonFrame(interfaceView);
+    mxStyleNoteButton(noteButton, mxVideoToNoteEnabled());
+    CGRect voiceFrame = mxVoiceButtonFrame(interfaceView);
+    CGRect noteFrame = CGRectOffset(voiceFrame, 0, kMxVoiceButtonSide + 8.0);
+    UIEdgeInsets safe = interfaceView.safeAreaInsets;
+    if (CGRectGetMaxY(noteFrame) > CGRectGetHeight(interfaceView.bounds) - safe.bottom - 8.0) {
+        noteFrame.origin.y = MAX(safe.top + 5.0,
+                                CGRectGetMinY(voiceFrame) - kMxVoiceButtonSide - 8.0);
+    }
+    button.frame = voiceFrame;
+    noteButton.frame = noteFrame;
     [interfaceView bringSubviewToFront:button];
+    [interfaceView bringSubviewToFront:noteButton];
 
 #if MX_DIAG
     // Printed once per placement decision, not per layout pass — layoutSubviews
@@ -596,6 +815,12 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
 // Only points genuinely inside the button are claimed here; everything else
 // goes to the original.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIButton *noteButton = (UIButton *)[self viewWithTag:kMxNoteButtonTag];
+    if (noteButton && !noteButton.hidden && noteButton.alpha > 0.01) {
+        if ([noteButton pointInside:[self convertPoint:point toView:noteButton] withEvent:event]) {
+            return noteButton;
+        }
+    }
     UIButton *button = (UIButton *)[self viewWithTag:kMxVoiceButtonTag];
     if (button && !button.hidden && button.alpha > 0.01) {
         if ([button pointInside:[self convertPoint:point toView:button] withEvent:event]) {
@@ -617,13 +842,16 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
                                 convertToJpeg:(bool)convertToJpeg
                          descriptionGenerator:(MxDescriptionGenerator)descriptionGenerator
                              saveEditedPhotos:(bool)saveEditedPhotos {
-    if (!mxVideoToVoiceEnabled() || !descriptionGenerator) return %orig;
+    if ((!mxVideoToVoiceEnabled() && !mxVideoToNoteEnabled()) ||
+        !descriptionGenerator) return %orig;
 
     MxDescriptionGenerator wrapped =
         ^id(id dict, NSAttributedString *caption, NSString *hash, NSString *uniqueId) {
             NSDictionary *rewritten = nil;
             @try {
-                rewritten = mxRewriteToVoice(dict, editingContext);
+                rewritten = mxVideoToNoteEnabled()
+                    ? mxRewriteToRoundVideo(dict, editingContext)
+                    : mxRewriteToVoice(dict, editingContext);
             } @catch (NSException *e) {
                 mxDiag("v2v: rewrite threw — %{public}s", e.reason.UTF8String ?: "?");
             }
@@ -644,6 +872,7 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
     // can still be reading it.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         [[NSFileManager defaultManager] removeItemAtPath:mxVoiceCacheRoot() error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:mxNoteCacheRoot() error:nil];
     });
 
     Class cls = objc_getClass("TGMediaAssetsController");
