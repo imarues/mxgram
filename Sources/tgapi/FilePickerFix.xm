@@ -1,7 +1,8 @@
 #import "Headers.h"
 
 bool shouldFixFilePicker() {
-	return [[NSUserDefaults standardUserDefaults] boolForKey:FILE_PICKER_FIX_KEY];
+    // Always enabled for the sideload build; even old saved OFF values cannot disable it.
+    return true;
 }
 
 %hook LegacyMediaPickerDocumentViewController 
@@ -118,12 +119,8 @@ bool shouldFixFilePicker() {
 
 __attribute__((constructor))
 static void initFileHooks() {
-	// Nothing to install when the fix is off, and the scan below walks every
-	// class in the process — tens of thousands of them, holding the runtime
-	// lock the main thread is also using while it loads classes during launch.
-	if (![[NSUserDefaults standardUserDefaults] boolForKey:FILE_PICKER_FIX_KEY]) {
-		return;
-	}
+	// Always install hooks, including on the very first run.
+    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:FILE_PICKER_FIX_KEY];
 
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),	^{
 
