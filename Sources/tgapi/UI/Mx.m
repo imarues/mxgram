@@ -946,8 +946,10 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       UISwitch *toggle = (UISwitch *)cell.accessoryView;
       if (!toggle || ![toggle isKindOfClass:[UISwitch class]]) toggle = [[UISwitch alloc] init];
       NSString *switchKey = [self switchKeyForIndexPath:indexPath];
-      toggle.on = [[NSUserDefaults standardUserDefaults] boolForKey:switchKey];
-      [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+      // The sideload file-picker fix is permanently active.
+      toggle.on = YES;
+      toggle.enabled = NO;
+      [toggle removeTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
       toggle.tag = 1000 + (indexPath.section * 1000) + indexPath.row;
       cell.accessoryView = toggle;
       cell.textLabel.numberOfLines = 0;
@@ -1346,6 +1348,11 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   NSString *switchKey = [self switchKeyForIndexPath:indexPath];
 
   if (switchKey) {
+    if ([switchKey isEqualToString:FILE_PICKER_FIX_KEY]) {
+      [[NSUserDefaults standardUserDefaults] setBool:YES forKey:FILE_PICKER_FIX_KEY];
+      [sender setOn:YES animated:YES];
+      return;
+    }
     if ([switchKey isEqualToString:kGhostModeEnabled] && sender.isOn) {
       if (![self anyGhostSubFeatureEnabled]) {
         [sender setOn:NO animated:YES];
