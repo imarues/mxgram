@@ -572,6 +572,7 @@ static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext) {
 static const CGFloat kMxVoiceButtonSide = 40.0;
 
 static const void *kMxItemIsVideoKey = &kMxItemIsVideoKey;
+static const void *kMxGalleryModeInitializedKey = &kMxGalleryModeInitializedKey;
 
 /// True for a picked video. Fetch-result items wrap the real one, so the
 /// backing item is checked too.
@@ -797,6 +798,17 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
 
 - (void)itemFocused:(id)item itemView:(id)itemView {
     %orig;
+    // Voice and round-note are per-preview choices. The previous build kept
+    // both toggles in NSUserDefaults forever; the next clip inherited the
+    // prior mode, and tapping the blue voice icon would turn it OFF instead
+    // of selecting voice. Start each newly opened gallery in normal mode.
+    if (!objc_getAssociatedObject(self, kMxGalleryModeInitializedKey)) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setBool:NO forKey:kVideoToVoice];
+        [defaults setBool:NO forKey:kVideoToNote];
+        objc_setAssociatedObject(self, kMxGalleryModeInitializedKey, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     objc_setAssociatedObject(self, kMxItemIsVideoKey, @(mxItemIsVideo(item)),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     mxUpdateVoiceButton(self);
