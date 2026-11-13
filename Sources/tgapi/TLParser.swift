@@ -1362,18 +1362,14 @@ class TLParser: NSObject {
     }
 
     private static func stripNoForwards(_ chat: Api.Chat) -> (Api.Chat, Bool) {
-        guard UserDefaults.standard.bool(forKey: "disableForwardRestriction") ||
-              UserDefaults.standard.bool(forKey: "MxAntiSelfDestruct") ||
-              UserDefaults.standard.bool(forKey: "MxAntiAutoDelete") else { return (chat, false) }
+        // NoForwards must not change unrelated optional-field or chat flags.
+        guard UserDefaults.standard.bool(forKey: "disableForwardRestriction") else { return (chat, false) }
               
         switch chat {
         case let .channel(data):
-            // Bit 16 is standard, bit 27 is used in neutralizedPayload, bit 5 is restricted
-            // Bit 27: copyProtectionEnabled
-            let mask: Int32 = ~( (1 << 16) | (1 << 27) | (1 << 5) )
-            
-            let newFlags = data.flags & mask
-            let newFlags2 = data.flags2 & mask
+            // channel.noforwards is bit 27 of flags, not flags2.
+            let newFlags = data.flags & ~(Int32(1) << 27)
+            let newFlags2 = data.flags2
             
             if newFlags == data.flags && newFlags2 == data.flags2 {
                 return (chat, false)
@@ -1394,9 +1390,8 @@ class TLParser: NSObject {
                 linkedCommunityId: data.linkedCommunityId
             )), true)
         case let .chat(data):
-            // Bit 14/16/25 are used for restrictions
-            let mask: Int32 = ~( (1 << 14) | (1 << 16) | (1 << 25) )
-            let newFlags = data.flags & mask
+            // chat.noforwards is bit 25.
+            let newFlags = data.flags & ~(Int32(1) << 25)
             if newFlags == data.flags {
                 return (chat, false)
             }
@@ -1425,61 +1420,9 @@ class TLParser: NSObject {
     }
     
     private static func stripNoForwardsFromFullChat(_ chatFull: Api.ChatFull) -> (Api.ChatFull, Bool) {
-        guard UserDefaults.standard.bool(forKey: "disableForwardRestriction") ||
-              UserDefaults.standard.bool(forKey: "MxAntiSelfDestruct") ||
-              UserDefaults.standard.bool(forKey: "MxAntiAutoDelete") else { return (chatFull, false) }
-              
-        switch chatFull {
-        case let .channelFull(data):
-            // Bit 10 is noforwards in some versions, clearing multiple bits for safety
-            let mask: Int32 = ~( (1 << 10) | (1 << 27) | (1 << 16) | (1 << 26) )
-            let newFlags = data.flags & mask
-            let newFlags2 = data.flags2 & mask
-            
-            if newFlags == data.flags && newFlags2 == data.flags2 {
-                return (chatFull, false)
-            }
-            
-            return (.channelFull(Api.ChatFull.Cons_channelFull(
-                flags: newFlags, flags2: newFlags2, id: data.id, about: data.about,
-                participantsCount: data.participantsCount, adminsCount: data.adminsCount,
-                kickedCount: data.kickedCount, bannedCount: data.bannedCount, onlineCount: data.onlineCount,
-                readInboxMaxId: data.readInboxMaxId, readOutboxMaxId: data.readOutboxMaxId,
-                unreadCount: data.unreadCount, chatPhoto: data.chatPhoto, notifySettings: data.notifySettings,
-                exportedInvite: data.exportedInvite, botInfo: data.botInfo, migratedFromChatId: data.migratedFromChatId,
-                migratedFromMaxId: data.migratedFromMaxId, pinnedMsgId: data.pinnedMsgId, stickerset: data.stickerset,
-                availableMinId: data.availableMinId, folderId: data.folderId, linkedChatId: data.linkedChatId,
-                location: data.location, slowmodeSeconds: data.slowmodeSeconds, slowmodeNextSendDate: data.slowmodeNextSendDate,
-                statsDc: data.statsDc, pts: data.pts, call: data.call, ttlPeriod: data.ttlPeriod,
-                pendingSuggestions: data.pendingSuggestions, groupcallDefaultJoinAs: data.groupcallDefaultJoinAs,
-                themeEmoticon: data.themeEmoticon, requestsPending: data.requestsPending,
-                recentRequesters: data.recentRequesters, defaultSendAs: data.defaultSendAs,
-                availableReactions: data.availableReactions, reactionsLimit: data.reactionsLimit,
-                stories: data.stories, wallpaper: data.wallpaper, boostsApplied: data.boostsApplied,
-                boostsUnrestrict: data.boostsUnrestrict, emojiset: data.emojiset,
-                botVerification: data.botVerification, stargiftsCount: data.stargiftsCount,
-                sendPaidMessagesStars: data.sendPaidMessagesStars, mainTab: data.mainTab,
-                guardBotId: data.guardBotId
-            )), true)
-        case let .chatFull(data):
-            let mask: Int32 = ~( (1 << 10) | (1 << 27) | (1 << 16) | (1 << 26) )
-            let newFlags = data.flags & mask
-            if newFlags == data.flags {
-                return (chatFull, false)
-            }
-            return (.chatFull(Api.ChatFull.Cons_chatFull(
-                flags: newFlags, id: data.id, about: data.about, participants: data.participants,
-                chatPhoto: data.chatPhoto, notifySettings: data.notifySettings, exportedInvite: data.exportedInvite,
-                botInfo: data.botInfo, pinnedMsgId: data.pinnedMsgId, folderId: data.folderId, call: data.call,
-                ttlPeriod: data.ttlPeriod, groupcallDefaultJoinAs: data.groupcallDefaultJoinAs,
-                themeEmoticon: data.themeEmoticon, requestsPending: data.requestsPending,
-                recentRequesters: data.recentRequesters, availableReactions: data.availableReactions,
-                reactionsLimit: data.reactionsLimit
-            )), true)
-        default:
-            // communityFull, new in 12.9, carries no forwarding restriction.
-            return (chatFull, false)
-        }
+        // NoForwards is represented on Chat and Message. Clearing bits on
+        // ChatFull corrupts unrelated fields; leave ChatFull untouched.
+        return (chatFull, false)
     }
 
     private static func shiftEntities(_ entities: [Api.MessageEntity]?, by offset: Int32) -> [Api.MessageEntity] {
@@ -1550,18 +1493,22 @@ class TLParser: NSObject {
             return (apiMsg, false)
         }
         
+        let antiSelfDestruct = UserDefaults.standard.bool(forKey: "MxAntiSelfDestruct")
         var isDestructing = false
-        if data.ttlPeriod != nil || (Int(data.flags) & Int(1 << 25)) != 0 {
+        if antiSelfDestruct && (data.ttlPeriod != nil || (Int(data.flags) & Int(1 << 25)) != 0) {
             isDestructing = true
             selfDestructingMessageIds.insert(data.id)
         }
 
-        let newMedia = data.media.map { stripTTLMedia($0, messageId: data.id) }
-        
-        let isMediaDestructing = selfDestructingMessageIds.contains(data.id)
-        let shouldStripFlags = isDestructing || isMediaDestructing
-        
-        let (newMessageText, newEntities) = applyTTLIndicator(message: data.message, entities: data.entities, shouldApply: shouldStripFlags)
+        let newMedia = antiSelfDestruct
+            ? data.media.map { stripTTLMedia($0, messageId: data.id) }
+            : data.media
+        let isMediaDestructing = antiSelfDestruct && selfDestructingMessageIds.contains(data.id)
+        let shouldStripFlags = antiSelfDestruct && (isDestructing || isMediaDestructing)
+
+        let (newMessageText, newEntities) = antiSelfDestruct
+            ? applyTTLIndicator(message: data.message, entities: data.entities, shouldApply: shouldStripFlags)
+            : (data.message, data.entities)
 
         if shouldStripFlags {
             diag("ttl: id=\(data.id) ttlPeriod=\(isDestructing) knownMedia=\(isMediaDestructing) "
@@ -1571,13 +1518,9 @@ class TLParser: NSObject {
         var newFlags = shouldStripFlags ? (data.flags & ~(1 << 25) & ~(1 << 5)) : data.flags
         var newFlags2 = data.flags2
         
-        // Strip noforwards if requested
-        if UserDefaults.standard.bool(forKey: "disableForwardRestriction") || 
-           UserDefaults.standard.bool(forKey: "MxAntiSelfDestruct") {
-            // Bit 14 is standard, bit 26 is used in neutralizePayload
-            let mask: Int32 = ~( (1 << 14) | (1 << 26) )
-            newFlags &= mask
-            newFlags2 &= mask
+        // Message.noforwards is bit 14 of flags only.
+        if UserDefaults.standard.bool(forKey: "disableForwardRestriction") {
+            newFlags &= ~(Int32(1) << 14)
         }
         
         // Set entities flag (bit 7) if we have entities
@@ -1963,6 +1906,46 @@ class TLParser: NSObject {
                     newResult = Api.messages.ChatFull.chatFull(Api.messages.ChatFull.Cons_chatFull(fullChat: newFullChat, chats: newChats, users: data.users))
                     modified = true
                 }
+            }
+        } else if let history = result as? Api.messages.Messages {
+            // History, search slices and channel message replies were missing.
+            // They must all run through the same message/chat patching logic.
+            switch history {
+            case let .messages(data):
+                let p = patchMessageBatch(data.messages, chats: data.chats)
+                if p.changed {
+                    newResult = Api.messages.Messages.messages(
+                        Api.messages.Messages.Cons_messages(
+                            messages: p.messages, topics: data.topics,
+                            chats: p.chats, users: data.users))
+                    modified = true
+                }
+            case let .messagesSlice(data):
+                let p = patchMessageBatch(data.messages, chats: data.chats)
+                if p.changed {
+                    newResult = Api.messages.Messages.messagesSlice(
+                        Api.messages.Messages.Cons_messagesSlice(
+                            flags: data.flags, count: data.count,
+                            nextRate: data.nextRate,
+                            offsetIdOffset: data.offsetIdOffset,
+                            searchFlood: data.searchFlood,
+                            messages: p.messages, topics: data.topics,
+                            chats: p.chats, users: data.users))
+                    modified = true
+                }
+            case let .channelMessages(data):
+                let p = patchMessageBatch(data.messages, chats: data.chats)
+                if p.changed {
+                    newResult = Api.messages.Messages.channelMessages(
+                        Api.messages.Messages.Cons_channelMessages(
+                            flags: data.flags, pts: data.pts,
+                            count: data.count, offsetIdOffset: data.offsetIdOffset,
+                            messages: p.messages, topics: data.topics,
+                            chats: p.chats, users: data.users))
+                    modified = true
+                }
+            case .messagesNotModified:
+                break
             }
         } else if let chats = result as? Api.messages.Chats {
             switch chats {

@@ -31,6 +31,30 @@ static BOOL mxNeedsResponsePatching(void) {
 
 #define kChannelsReadHistory -871347913
 
+// Telegram may gzip-pack high-volume history/channel responses. Patch the
+// *decompressed* TL object while preserving the untouched original bytes
+// whenever parsing reports no modifications.
+static NSData *mxUnpackResponseForPatch(NSData *data) {
+  if (!data || data.length < 8 || data.length > 16 * 1024 * 1024) return nil;
+  uint32_t magic = 0;
+  memcpy(&magic, data.bytes, sizeof(magic));
+  if (magic != 0x3072CFA1U) return nil; // gzip_packed
+  const uint8_t *bytes = (const uint8_t *)data.bytes;
+  NSUInteger offset = 4;
+  NSUInteger size = 0;
+  if (bytes[offset] < 254) {
+    size = bytes[offset++];
+  } else if (bytes[offset] == 254 && data.length >= 8) {
+    size = bytes[offset + 1] | ((NSUInteger)bytes[offset + 2] << 8) |
+           ((NSUInteger)bytes[offset + 3] << 16);
+    offset += 4;
+  } else {
+    return nil;
+  }
+  if (!size || size > data.length - offset) return nil;
+  return decompressGzip(bytes + offset, size);
+}
+
 %hook MTRequest %property(nonatomic, strong) NSData *fakeData;
 %property(nonatomic, strong) NSNumber *functionID;
 
@@ -59,20 +83,11 @@ static BOOL mxNeedsResponsePatching(void) {
 
   id (^hooked_block)(NSData *) = ^(NSData *inputData) {
     NSNumber *functionIDNumber = [NSNumber numberWithUnsignedInt:functionID];
-    NSData *parsed =
-        [TLParser handleResponse:inputData functionID:functionIDNumber];
-    NSData *toUse = parsed ?: inputData;
-
-    // Strip noforwards from request responses (messages.getHistory, etc.)
-    // so the save/forward button appears for newly fetched restricted messages.
-    if ([[NSUserDefaults standardUserDefaults]
-            boolForKey:kDisableForwardRestriction]) {
-      NSData *cleared = neutralizePayload(toUse, NO, NO);
-      if (cleared)
-        toUse = cleared;
-    }
-
-    return responseParser(toUse);
+    NSData *source = mxUnpackResponseForPatch(inputData) ?: inputData;
+    NSData *parsed = [TLParser handleResponse:source functionID:functionIDNumber];
+    // Do not alter replies unless the typed TL parser actually succeeded.
+    // The old neutralizePayload(..., NO, NO) call was a no-op here.
+    return responseParser(parsed ?: inputData);
   };
 
   switch (functionID) {
