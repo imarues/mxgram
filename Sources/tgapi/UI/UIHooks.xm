@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import "Headers.h"
 #import "../Logger/Logger.h"
+#import "../MxPurge.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -1407,6 +1408,14 @@ static Class mxChatControllerClass(void) {
 // %init below resolves Impl first and keeps the old name as a fallback for any
 // client still shipping it.
 %hook _TtC10TelegramUI18ChatControllerImpl
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    MxPurgeChatAppeared((UIViewController *)self);
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+    MxPurgeChatDisappeared((UIViewController *)self);
+}
 - (void)viewDidLoad {
     %orig;
     @try {
