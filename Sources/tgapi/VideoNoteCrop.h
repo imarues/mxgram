@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <dispatch/dispatch.h>
 
 // Crop selection is a preview-only step. This function never sends a message;
 // Telegram's existing Send button remains responsible for sending.
