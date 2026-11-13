@@ -157,6 +157,12 @@
 "VIDEO_TO_NOTE_CONVERTING" = "جارٍ تحويل الفيديو إلى فيديو دائري…";
 "VIDEO_TO_NOTE_SUCCESS" = "الفيديو الدائري جاهز — جارٍ الإرسال";
 "VIDEO_TO_NOTE_FAILED" = "تعذّر تحويل الفيديو — سيُرسل الفيديو الأصلي بدلًا منه";
+"VIDEO_NOTE_CROP_TITLE" = "تحديد مكان دائرة الفيديو";
+"VIDEO_NOTE_CROP_HINT" = "اسحب الدائرة لتحديد الجزء المطلوب، ثم اضغط اعتماد وبعدها إرسال.";
+"VIDEO_NOTE_CROP_APPLY" = "اعتماد";
+"VIDEO_NOTE_CROP_NORMAL" = "فيديو عادي";
+"VIDEO_NOTE_CROP_LOADING" = "جارٍ تحميل معاينة الفيديو…";
+"VIDEO_NOTE_CROP_ERROR" = "تعذّر فتح معاينة هذا الفيديو.";
 
 /* First-run alert */
 "WELCOME_BODY" = "تم تثبيت Mx.\n\nلفتح قائمة Mx:\n%@";
