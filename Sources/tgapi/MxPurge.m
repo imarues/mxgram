@@ -1,0 +1,391 @@
+// Per-chat "Delete My Messages" interface and verified MTProto execution.
+// Never delete conversation history, delete messages from other authors,
+// or fall back to a global message search. The default is OFF.
+#import "MxPurge.h"
+#import "Headers.h"
+#import "UI/Headers.h"
+#import <objc/runtime.h>
+
+@interface MxPurgeCodec : NSObject
++ (NSDictionary *)peerFromRequest:(NSData *)payload;
++ (NSString *)chatKeyForController:(id)controller;
++ (NSNumber *)accountIdForContext:(id)context;
++ (NSData *)makeSelfCheck;
++ (NSNumber *)selfIdFromResponse:(NSData *)data;
++ (NSData *)makeSearchForPeer:(NSData *)peer offset:(int32_t)offset limit:(int32_t)limit;
++ (NSDictionary *)searchResult:(NSData *)data;
++ (NSData *)makeDeleteForPeer:(NSData *)peer ids:(NSArray<NSNumber *> *)ids;
++ (BOOL)deleteSucceeded:(NSData *)data;
+@end
+
+static NSString *mxPurgeText(NSString *ar, NSString *en) {
+    NSString *c = [MxLocalization localizedStringForKey:@"CANCEL"];
+    BOOL arabic = [c isEqualToString:@"إلغاء"] ||
+        ((!c.length || [c isEqualToString:@"CANCEL"]) &&
+         [[[NSLocale preferredLanguages].firstObject lowercaseString] hasPrefix:@"ar"]);
+    return arabic ? ar : en;
+}
+static const void *kMxPurgeContextKey = &kMxPurgeContextKey;
+
+@interface MxPurgeContext : NSObject
+@property (nonatomic, weak) UIViewController *controller;
+@property (nonatomic, weak) MTRequestMessageService *service;
+@property (nonatomic, copy) NSString *peerKey;
+@property (nonatomic, strong) NSData *peerData;
+@property (nonatomic, strong) NSNumber *accountId;
+@property (nonatomic, strong) UIButton *button;
+@property (nonatomic, strong) UIBarButtonItem *barItem;
+@property (nonatomic, assign) BOOL busy;
+@property (nonatomic, assign) BOOL cancelled;
+@property (nonatomic, assign) BOOL partial;
+@property (nonatomic, assign) BOOL verifiedEmpty;
+@property (nonatomic, assign) BOOL scanned;
+@property (nonatomic, assign) NSUInteger deletedCount;
+@property (nonatomic, assign) NSUInteger batchCount;
+@property (nonatomic, assign) NSUInteger repeatCount;
+@property (nonatomic, strong) NSMutableSet<NSNumber *> *deletedIds;
+@end
+@implementation MxPurgeContext @end
+
+@interface MxPurgePeer : NSObject
+@property (nonatomic, copy) NSString *key;
+@property (nonatomic, strong) NSData *peerData;
+@property (nonatomic, weak) MTRequestMessageService *service;
+@end
+@implementation MxPurgePeer @end
+
+@interface MxPurgePending : NSObject
+@property (nonatomic, assign) BOOL resolved;
+@end
+@implementation MxPurgePending @end
+
+typedef void (^MxPurgeResult)(NSData *response, NSString *error);
+
+@interface MxPurgeManager : NSObject
+@property (nonatomic, strong) NSMutableDictionary<NSString *, MxPurgePeer *> *peers;
+@property (nonatomic, weak) UIViewController *visibleChat;
++ (instancetype)shared;
+- (void)capture:(MTRequest *)request service:(MTRequestMessageService *)service;
+- (void)appeared:(UIViewController *)controller;
+- (void)disappeared:(UIViewController *)controller;
+- (void)settingsChanged;
+- (void)tapped:(UIButton *)button;
+@end
+
+@implementation MxPurgeManager
+
++ (instancetype)shared {
+    static MxPurgeManager *manager;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        manager = [MxPurgeManager new];
+        manager.peers = [NSMutableDictionary dictionary];
+    });
+    return manager;
+}
+- (BOOL)enabled {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kDeleteMyMessages];
+}
+- (void)capture:(MTRequest *)request service:(MTRequestMessageService *)service {
+    if (![self enabled] || !request.payload || !service) return;
+    NSDictionary *found = [MxPurgeCodec peerFromRequest:request.payload];
+    NSString *key = found[@"key"];
+    NSData *peerData = found[@"peerData"];
+    if (!key.length || !peerData.length) return;
+    @synchronized (self) {
+        MxPurgePeer *record = self.peers[key] ?: [MxPurgePeer new];
+        record.key = key;
+        record.peerData = peerData;
+        record.service = service;
+        self.peers[key] = record;
+        if (self.peers.count > 128) {
+            // Cache-only hint; no persisted peer credentials.
+            [self.peers removeAllObjects];
+            self.peers[key] = record;
+        }
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = self.visibleChat;
+        MxPurgeContext *ctx = vc ? objc_getAssociatedObject(vc, kMxPurgeContextKey) : nil;
+        if (ctx && !ctx.cancelled && [ctx.peerKey isEqualToString:key] && !ctx.busy) {
+            [self lookupContext:ctx];
+        }
+    });
+}
+- (void)settingsChanged {
+    if (![self enabled]) {
+        @synchronized (self) { [self.peers removeAllObjects]; }
+        UIViewController *vc = self.visibleChat;
+        MxPurgeContext *ctx = vc ? objc_getAssociatedObject(vc, kMxPurgeContextKey) : nil;
+        if (ctx) {
+            ctx.cancelled = YES;
+            [ctx.barItem.customView removeFromSuperview];
+            NSMutableArray *items = [vc.navigationItem.rightBarButtonItems mutableCopy];
+            [items removeObject:ctx.barItem];
+            vc.navigationItem.rightBarButtonItems = items;
+        }
+    }
+}
+- (void)appeared:(UIViewController *)controller {
+    if (!controller || ![self enabled]) return;
+    self.visibleChat = controller;
+    NSString *key = [MxPurgeCodec chatKeyForController:controller];
+    // Exact namespace-qualified chat peer is mandatory. In particular,
+    // never offer deletion inside secret chats or unknown thread locations.
+    if (!key.length) return;
+    id accountContext = nil;
+    @try { accountContext = [(id)controller valueForKey:@"context"]; }
+    @catch (__unused NSException *exception) {}
+    NSNumber *own = accountContext ? [MxPurgeCodec accountIdForContext:accountContext] : nil;
+    // If the chat doesn't expose its account identity, deletion is disabled.
+    MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
+    if (!ctx || ![ctx.peerKey isEqualToString:key]) {
+        ctx = [MxPurgeContext new];
+        ctx.controller = controller;
+        ctx.peerKey = key;
+        ctx.accountId = own;
+        ctx.deletedIds = [NSMutableSet set];
+        objc_setAssociatedObject(controller, kMxPurgeContextKey, ctx, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else {
+        ctx.cancelled = NO;
+        ctx.accountId = own;
+    }
+    if (!ctx.button) {
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.frame = CGRectMake(0, 0, 39, 39);
+        button.accessibilityLabel = mxPurgeText(@"حذف كل رسائلي في هذه المحادثة",
+                                                  @"Delete my messages in this chat");
+        button.tag = 91017;
+        [button addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
+        ctx.button = button;
+        ctx.barItem = [[UIBarButtonItem alloc] initWithCustomView:button];
+    }
+    if (![controller.navigationItem.rightBarButtonItems containsObject:ctx.barItem]) {
+        NSMutableArray *items = [controller.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
+        [items addObject:ctx.barItem];
+        controller.navigationItem.rightBarButtonItems = items;
+    }
+    [self style:ctx];
+    [self lookupContext:ctx];
+}
+- (void)disappeared:(UIViewController *)controller {
+    MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
+    if (ctx) ctx.cancelled = YES;
+    if (self.visibleChat == controller) self.visibleChat = nil;
+}
+- (void)style:(MxPurgeContext *)ctx {
+    if (!ctx.button) return;
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration
+        configurationWithPointSize:21 weight:UIImageSymbolWeightSemibold];
+    UIImage *img = [[UIImage systemImageNamed:@"trash.fill"] imageByApplyingSymbolConfiguration:cfg];
+    [ctx.button setImage:img forState:UIControlStateNormal];
+    UIColor *color = [UIColor systemGrayColor];
+    if (!ctx.busy && ctx.scanned) {
+        if (ctx.verifiedEmpty) color = [UIColor systemGreenColor];
+        else if (ctx.partial) color = [UIColor systemOrangeColor];
+        else color = [UIColor systemRedColor];
+    }
+    ctx.button.tintColor = color;
+    ctx.button.enabled = !ctx.busy && ctx.scanned && !ctx.verifiedEmpty && !ctx.cancelled;
+    ctx.button.alpha = ctx.button.enabled ? 1.0 : 0.70;
+}
+- (void)message:(NSString *)message title:(NSString *)title context:(MxPurgeContext *)ctx {
+    UIViewController *vc = ctx.controller;
+    if (!vc || !vc.view.window) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:mxPurgeText(@"حسناً", @"OK")
+                                              style:UIAlertActionStyleDefault handler:nil]];
+    [vc presentViewController:alert animated:YES completion:nil];
+}
+- (void)send:(NSData *)data service:(MTRequestMessageService *)service
+       done:(MxPurgeResult)done {
+    if (!data.length || !service) {
+        if (done) done(nil, @"No authenticated request service or invalid peer.");
+        return;
+    }
+    MTRequest *request = [MTRequest new];
+    MxPurgePending *pending = [MxPurgePending new];
+    [request setPayload:data metadata:@"MxPurge" shortMetadata:@"MxPurge"
+         responseParser:^id(NSData *response) { return response; }];
+    request.completed = ^(id result, __unused MTRequestResponseInfo *info, MTRpcError *error) {
+        @synchronized (pending) {
+            if (pending.resolved) return;
+            pending.resolved = YES;
+        }
+        NSString *description = error ? [error errorDescription] : nil;
+        NSData *response = [result isKindOfClass:[NSData class]] ? result : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (done) done(response, description ?: (response ? nil : @"No server response."));
+        });
+    };
+    [service addRequest:request];
+    // Do not keep deleting if an RPC request never returns.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 35 * NSEC_PER_SEC),
+                   dispatch_get_main_queue(), ^{
+        @synchronized (pending) {
+            if (pending.resolved) return;
+            pending.resolved = YES;
+        }
+        if (done) done(nil, @"Request timed out; deletion may be partial.");
+    });
+}
+- (BOOL)stillCurrent:(MxPurgeContext *)ctx {
+    return [self enabled] && ctx && !ctx.cancelled &&
+        self.visibleChat == ctx.controller && ctx.controller.view.window &&
+        ctx.service && ctx.peerData.length && ctx.accountId.longLongValue > 0;
+}
+- (void)lookupContext:(MxPurgeContext *)ctx {
+    if (!ctx || ctx.busy || ctx.cancelled || !ctx.accountId || ![self enabled]) return;
+    MxPurgePeer *peer = nil;
+    @synchronized (self) { peer = self.peers[ctx.peerKey]; }
+    if (!peer.service || !peer.peerData.length) return;
+    ctx.service = peer.service;
+    ctx.peerData = peer.peerData;
+    ctx.busy = YES;
+    [self style:ctx];
+    // Strong identity proof: the service being used must be the account of
+    // the visible ChatController. This blocks a second logged-in account.
+    [self send:[MxPurgeCodec makeSelfCheck] service:ctx.service
+          done:^(NSData *response, NSString *error) {
+        if (ctx.cancelled || ![self stillCurrent:ctx]) { ctx.busy = NO; return; }
+        NSNumber *serverId = error ? nil : [MxPurgeCodec selfIdFromResponse:response];
+        if (!serverId || ![serverId isEqualToNumber:ctx.accountId]) {
+            ctx.busy = NO;
+            ctx.scanned = NO;
+            [self style:ctx];
+            return; // fail closed, never guess session ownership
+        }
+        NSData *query = [MxPurgeCodec makeSearchForPeer:ctx.peerData offset:0 limit:2];
+        [self send:query service:ctx.service done:^(NSData *data, NSString *searchError) {
+            ctx.busy = NO;
+            if (ctx.cancelled || ![self stillCurrent:ctx]) { [self style:ctx]; return; }
+            NSDictionary *parsed = searchError ? nil : [MxPurgeCodec searchResult:data];
+            if (parsed) {
+                NSUInteger count = [parsed[@"ids"] count];
+                ctx.scanned = YES;
+                ctx.verifiedEmpty = count == 0;
+                if (ctx.verifiedEmpty) ctx.partial = NO;
+            } else {
+                ctx.scanned = NO;
+            }
+            [self style:ctx];
+        }];
+    }];
+}
+- (void)tapped:(UIButton *)button {
+    MxPurgeContext *ctx = objc_getAssociatedObject(self.visibleChat, kMxPurgeContextKey);
+    if (!ctx || ctx.button != button || ![self stillCurrent:ctx] ||
+        !ctx.scanned || ctx.verifiedEmpty || ctx.busy) return;
+    NSString *chat = ctx.controller.navigationItem.title ?: ctx.controller.title ?: ctx.peerKey;
+    NSString *title = mxPurgeText(@"حذف كل رسائلي", @"Delete My Messages");
+    NSString *description = mxPurgeText(
+        [NSString stringWithFormat:@"سيتم حذف الرسائل التي أرسلتها في «%@» فقط، وعند الجميع حيث يسمح تيليجرام. لا يمكن التراجع عن هذا الإجراء. هل تؤكد؟", chat],
+        [NSString stringWithFormat:@"Delete only YOUR messages in “%@” for everyone where Telegram permits it? This cannot be undone.", chat]);
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:description
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:mxPurgeText(@"إلغاء", @"Cancel")
+                                              style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:mxPurgeText(@"نعم، احذف رسائلي", @"Delete my messages")
+                                              style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+        if (![self stillCurrent:ctx]) return;
+        ctx.busy = YES;
+        ctx.batchCount = 0;
+        ctx.repeatCount = 0;
+        ctx.deletedCount = 0;
+        ctx.verifiedEmpty = NO;
+        [ctx.deletedIds removeAllObjects];
+        [self style:ctx];
+        [self purgeNext:ctx];
+    }]];
+    [ctx.controller presentViewController:alert animated:YES completion:nil];
+}
+- (void)finish:(MxPurgeContext *)ctx fully:(BOOL)fully detail:(NSString *)detail {
+    ctx.busy = NO;
+    ctx.scanned = YES;
+    ctx.verifiedEmpty = fully;
+    ctx.partial = !fully && ctx.deletedCount > 0;
+    [self style:ctx];
+    NSString *msg = fully
+        ? mxPurgeText([NSString stringWithFormat:@"تم حذف %lu رسالة، وتأكدنا من عدم بقاء رسائل منك في هذه المحادثة.", (unsigned long)ctx.deletedCount],
+                      [NSString stringWithFormat:@"Deleted %lu messages. A new server search found no remaining messages from you in this chat.", (unsigned long)ctx.deletedCount])
+        : mxPurgeText([NSString stringWithFormat:@"تم حذف %lu رسالة على الأقل. بقيت رسائل أو تعذّر التأكد من اكتمال الحذف. %@", (unsigned long)ctx.deletedCount, detail ?: @""],
+                      [NSString stringWithFormat:@"At least %lu messages deleted. Some may remain or verification failed. %@", (unsigned long)ctx.deletedCount, detail ?: @""]);
+    [self message:msg title:mxPurgeText(fully ? @"اكتمل الحذف" : @"حذف جزئي", fully ? @"Deletion complete" : @"Partial deletion")
+         context:ctx];
+}
+- (void)purgeNext:(MxPurgeContext *)ctx {
+    if (![self stillCurrent:ctx]) { [self finish:ctx fully:NO detail:@""]; return; }
+    if (++ctx.batchCount > 150) {
+        [self finish:ctx fully:NO detail:mxPurgeText(@"توقفنا عند حد الأمان، اضغط السلة لإكمال الباقي.",
+                                                     @"Safety batch limit reached; tap to retry.")];
+        return;
+    }
+    NSData *search = [MxPurgeCodec makeSearchForPeer:ctx.peerData offset:0 limit:80];
+    [self send:search service:ctx.service done:^(NSData *response, NSString *error) {
+        if (![self stillCurrent:ctx]) { [self finish:ctx fully:NO detail:@""]; return; }
+        NSDictionary *result = error ? nil : [MxPurgeCodec searchResult:response];
+        if (!result) { [self finish:ctx fully:NO detail:error]; return; }
+        NSArray<NSNumber *> *ids = result[@"ids"];
+        if (!ids.count) {
+            // Search again after a brief settle period. A successful delete
+            // request alone is NOT evidence that all messages are gone.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                if (![self stillCurrent:ctx]) { [self finish:ctx fully:NO detail:@""]; return; }
+                NSData *check = [MxPurgeCodec makeSearchForPeer:ctx.peerData offset:0 limit:2];
+                [self send:check service:ctx.service done:^(NSData *verified, NSString *checkError) {
+                    NSDictionary *last = checkError ? nil : [MxPurgeCodec searchResult:verified];
+                    BOOL clear = last && [last[@"ids"] count] == 0;
+                    [self finish:ctx fully:clear detail:checkError];
+                }];
+            });
+            return;
+        }
+        NSMutableArray *batch = [NSMutableArray arrayWithCapacity:ids.count];
+        for (NSNumber *msg in ids) {
+            if (![ctx.deletedIds containsObject:msg]) [batch addObject:msg];
+        }
+        if (!batch.count) {
+            // Avoid repeatedly deleting the same IDs while search indexing
+            // catches up. Do not paint green on a stale query.
+            if (++ctx.repeatCount > 3) {
+                [self finish:ctx fully:NO detail:mxPurgeText(@"التحديث على الخادم متأخر. حاول مجدداً.",
+                                                             @"Server search has not caught up; retry.")];
+                return;
+            }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ [self purgeNext:ctx]; });
+            return;
+        }
+        ctx.repeatCount = 0;
+        NSData *deleteRequest = [MxPurgeCodec makeDeleteForPeer:ctx.peerData ids:batch];
+        [self send:deleteRequest service:ctx.service done:^(NSData *resultData, NSString *deleteError) {
+            if (![self stillCurrent:ctx]) { [self finish:ctx fully:NO detail:@""]; return; }
+            if (deleteError || ![MxPurgeCodec deleteSucceeded:resultData]) {
+                [self finish:ctx fully:NO detail:deleteError]; return;
+            }
+            [ctx.deletedIds addObjectsFromArray:batch];
+            ctx.deletedCount += batch.count;
+            // Respect API rate limits. Errors and timeouts stop the loop.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ [self purgeNext:ctx]; });
+        }];
+    }];
+}
+@end
+
+void MxPurgeCaptureRequest(MTRequest *request, MTRequestMessageService *service) {
+    [[MxPurgeManager shared] capture:request service:service];
+}
+void MxPurgeChatAppeared(UIViewController *controller) {
+    [[MxPurgeManager shared] appeared:controller];
+}
+void MxPurgeChatDisappeared(UIViewController *controller) {
+    [[MxPurgeManager shared] disappeared:controller];
+}
+void MxPurgeSettingsChanged(void) {
+    [[MxPurgeManager shared] settingsChanged];
+}
