@@ -70,20 +70,29 @@ final class MxPurgeCodec: NSObject {
     // Recover only the actual ChatLocation.peer's Postbox PeerId. The
     // namespace makes a user id, basic-group id and channel id distinct.
     private static func numeric(_ obj: Any, depth: Int = 0) -> Int64? {
-        if depth > 5 { return nil }
+        if depth > 8 { return nil }
         if let n = obj as? NSNumber { return n.int64Value }
         if let n = obj as? Int64 { return n }
         if let n = obj as? Int32 { return Int64(n) }
+        if let n = obj as? Int { return Int64(n) }
         if let n = obj as? UInt32 { return Int64(n) }
-        for item in Mirror(reflecting: obj).children {
-            if ["rawValue", "_value", "value", "id", "namespace"].contains(item.label ?? "") {
-                if let val = numeric(item.value, depth: depth + 1) { return val }
-            }
+        if let n = obj as? UInt64, n <= UInt64(Int64.max) { return Int64(n) }
+        // Newer Postbox PeerId.Id/Namespace wrap their scalar in a private
+        // single-field struct. The previous name-only walker silently lost
+        // every chat and account ID in such builds.
+        let children = Array(Mirror(reflecting: obj).children)
+        for child in children where ["rawValue", "_rawValue", "_internalValue",
+                                      "_internalId", "_value", "value",
+                                      "id", "namespace"].contains(child.label ?? "") {
+            if let result = numeric(child.value, depth: depth + 1) { return result }
+        }
+        if children.count == 1 {
+            return numeric(children[0].value, depth: depth + 1)
         }
         return nil
     }
     private static func peerIdKey(_ obj: Any, depth: Int = 0) -> String? {
-        if depth > 7 { return nil }
+        if depth > 9 { return nil }
         let mirror = Mirror(reflecting: obj)
         if let ns = mirror.children.first(where: { $0.label == "namespace" }),
            let id = mirror.children.first(where: { $0.label == "id" }),
@@ -91,24 +100,40 @@ final class MxPurgeCodec: NSObject {
            (0...2).contains(namespace), peer > 0 {
             return "\(namespace):\(peer)"
         }
+        // Some PeerId implementations expose only CustomStringConvertible
+        // rather than the two stored members. Accept only an entire typed
+        // namespace:id value, never a substring of a controller description.
+        let exact = String(describing: obj)
+        if exact.range(of: "^[012]:[1-9][0-9]*$", options: .regularExpression) != nil {
+            return exact
+        }
         for child in mirror.children {
             if let found = peerIdKey(child.value, depth: depth + 1) { return found }
         }
         return nil
     }
 
-    // Do not walk controller.context or any message fields: they contain many
-    // unrelated PeerIds. Only a field explicitly called chatLocation is valid.
+    // Only the chatLocation.peer enum case is an ordinary chat.
+    // A reply thread has a peer too, but must never be treated as a full chat.
+    private static func locationKey(_ location: Any, depth: Int = 0) -> String? {
+        guard depth < 3 else { return nil }
+        let mirror = Mirror(reflecting: location)
+        if mirror.displayStyle == .optional, let child = mirror.children.first {
+            return locationKey(child.value, depth: depth + 1)
+        }
+        guard mirror.displayStyle == .enum,
+              let selected = mirror.children.first,
+              selected.label == "peer" else { return nil }
+        return peerIdKey(selected.value)
+    }
+
+    // Do not walk controller.context or any messages to guess a chat id.
     @objc(chatKeyForController:)
     static func chatKeyForController(_ controller: AnyObject) -> NSString? {
         var mirror: Mirror? = Mirror(reflecting: controller)
         while let m = mirror {
             for item in m.children where item.label == "chatLocation" {
-                // A thread's peer id is not enough to scope search by topic:
-                // never offer the action on reply-thread screens.
-                let desc = String(describing: item.value)
-                guard desc.contains("peer") && !desc.contains("replyThread") else { return nil }
-                return peerIdKey(item.value) as NSString?
+                return locationKey(item.value) as NSString?
             }
             mirror = m.superclassMirror
         }
@@ -142,6 +167,28 @@ final class MxPurgeCodec: NSObject {
         while let m = mirror {
             for child in m.children where child.label == "account" {
                 if let result = accountPeerId(child.value) { return result }
+            }
+            mirror = m.superclassMirror
+        }
+        return nil
+    }
+
+    // ChatControllerImpl.context is a Swift stored property on VoidGram.
+    // Objective-C KVC does not reliably expose it. Reflect the specific
+    // controller.context -> context.account -> account.peerId path instead.
+    @objc(accountIdForController:)
+    static func accountIdForController(_ controller: AnyObject) -> NSNumber? {
+        var mirror: Mirror? = Mirror(reflecting: controller)
+        while let m = mirror {
+            for item in m.children where item.label == "context" {
+                let context = item.value
+                var cm: Mirror? = Mirror(reflecting: context)
+                while let current = cm {
+                    for field in current.children where field.label == "account" {
+                        if let id = accountPeerId(field.value) { return id }
+                    }
+                    cm = cm?.superclassMirror
+                }
             }
             mirror = m.superclassMirror
         }

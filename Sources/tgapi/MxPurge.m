@@ -14,6 +14,7 @@
 + (NSDictionary *)peerFromRequest:(NSData *)payload;
 + (NSString *)chatKeyForController:(id)controller;
 + (NSNumber *)accountIdForContext:(id)context;
++ (NSNumber *)accountIdForController:(id)controller;
 + (NSData *)makeSelfCheck;
 + (NSNumber *)selfIdFromResponse:(NSData *)data;
 + (NSData *)makeSearchForPeer:(NSData *)peer offset:(int32_t)offset limit:(int32_t)limit;
@@ -37,6 +38,7 @@ static const void *kMxPurgeContextKey = &kMxPurgeContextKey;
 @property (nonatomic, copy) NSString *peerKey;
 @property (nonatomic, strong) NSData *peerData;
 @property (nonatomic, strong) NSNumber *accountId;
+@property (nonatomic, copy) NSString *failureReason;
 @property (nonatomic, strong) UIButton *button;
 @property (nonatomic, strong) UIBarButtonItem *barItem; // legacy; custom Telegram nav ignores it
 @property (nonatomic, assign) BOOL busy;
@@ -160,24 +162,29 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         return;
     }
     NSString *key = [MxPurgeCodec chatKeyForController:controller];
-    id accountContext = nil;
-    @try { accountContext = [(id)controller valueForKey:@"context"]; }
-    @catch (__unused NSException *exception) {}
-    NSNumber *own = accountContext ? [MxPurgeCodec accountIdForContext:accountContext] : nil;
-    // A missing key or account leaves a visible gray icon. NEVER replace it
-    // with an inferred peer or pick a peer from another conversation.
-    BOOL sameChat = old && [old.peerKey isEqualToString:key ?: @""];
-    MxPurgeContext *ctx = sameChat ? old : [MxPurgeContext new];
-    if (!sameChat) {
-        old.cancelled = YES;
-        [old.button removeFromSuperview];
-        ctx.deletedIds = [NSMutableSet set];
-        ctx.peerKey = key ?: @"";
-        objc_setAssociatedObject(controller, kMxPurgeContextKey, ctx, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    // KVC cannot reliably read Swift ChatControllerImpl.context.
+    NSNumber *own = [MxPurgeCodec accountIdForController:controller];
+    // Force a new per-chat verification on every entry. A callback from an
+    // earlier appearance must never reauthorize deletion after navigation.
+    old.cancelled = YES;
+    [old.button removeFromSuperview];
+    MxPurgeContext *ctx = [MxPurgeContext new];
+    ctx.deletedIds = [NSMutableSet set];
+    ctx.peerKey = key ?: @"";
+    objc_setAssociatedObject(controller, kMxPurgeContextKey, ctx, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     ctx.controller = controller;
     ctx.cancelled = NO;
     ctx.accountId = own;
+    if (!key.length) {
+        ctx.failureReason = mxPurgeText(@"تعذّر قراءة هوية هذه المحادثة من إصدار تيليجرام.",
+                                        @"This Telegram build did not expose the chat identity.");
+    } else if (own.longLongValue <= 0) {
+        ctx.failureReason = mxPurgeText(@"تعذّر قراءة هوية الحساب الحالي من واجهة المحادثة.",
+                                        @"Could not read the account identity from the chat.");
+    } else {
+        ctx.failureReason = mxPurgeText(@"لم تتوفر بعد بيانات الاتصال الموثقة لهذه المحادثة.",
+                                        @"No authenticated request for this chat has been captured yet.");
+    }
     if (!ctx.button) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
         button.frame = CGRectMake(0, 0, 44, 44);
@@ -289,7 +296,11 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
     if (!ctx || ctx.busy || ctx.cancelled || !ctx.accountId || ![self enabled]) return;
     MxPurgePeer *peer = nil;
     @synchronized (self) { peer = self.peers[ctx.peerKey]; }
-    if (!peer.service || !peer.peerData.length) return;
+    if (!peer.service || !peer.peerData.length) {
+        ctx.failureReason = mxPurgeText(@"لم يصل بعد طلب موثق يخص هذه المحادثة. لا يمكن الحذف بدون التحقق من وجهة الرسائل.",
+                                        @"No authenticated request for this chat was observed. Cannot delete without proving the destination.");
+        return;
+    }
     ctx.service = peer.service;
     ctx.peerData = peer.peerData;
     ctx.busy = YES;
@@ -303,6 +314,11 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         if (!serverId || ![serverId isEqualToNumber:ctx.accountId]) {
             ctx.busy = NO;
             ctx.scanned = NO;
+            ctx.failureReason = error.length
+                ? [NSString stringWithFormat:mxPurgeText(@"فشل تحقق الحساب: %@",
+                                                         @"Account verification failed: %@"), error]
+                : mxPurgeText(@"تعذّرت مطابقة جلسة تيليجرام الحالية مع الحساب. لن يتم الحذف.",
+                              @"Telegram session did not match the current account. Nothing will be deleted.");
             [self style:ctx];
             return; // fail closed, never guess session ownership
         }
@@ -315,10 +331,16 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
                 NSUInteger count = [parsed[@"ids"] count];
                 NSUInteger returned = [parsed[@"returned"] unsignedIntegerValue];
                 ctx.scanned = YES;
+                ctx.failureReason = nil;
                 ctx.verifiedEmpty = count == 0 && returned == 0;
                 if (ctx.verifiedEmpty) ctx.partial = NO;
             } else {
                 ctx.scanned = NO;
+                ctx.failureReason = searchError.length
+                    ? [NSString stringWithFormat:mxPurgeText(@"رفض الخادم البحث: %@",
+                                                             @"Server rejected the search: %@"), searchError]
+                    : mxPurgeText(@"تعذّر تحليل جواب البحث من تيليجرام.",
+                                  @"Telegram returned a search response that could not be parsed.");
             }
             [self style:ctx];
         }];
@@ -328,8 +350,12 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
     MxPurgeContext *ctx = objc_getAssociatedObject(self.visibleChat, kMxPurgeContextKey);
     if (!ctx || ctx.button != button || ctx.busy) return;
     if (!ctx.scanned || ![self stillCurrent:ctx]) {
-        [self message:mxPurgeText(@"تعذّر التحقق من المحادثة والحساب الحالي أو الاتصال بالخادم. افتح المحادثة من جديد وحاول.",
-                                  @"Could not verify this chat, account or server connection. Reopen the chat and try again.")
+        // Retry verification when possible, but never bypass it to delete.
+        if (!ctx.busy && ctx.peerKey.length && ctx.accountId.longLongValue > 0) {
+            [self lookupContext:ctx];
+        }
+        [self message:ctx.failureReason ?: mxPurgeText(@"تعذّر التحقق من هذه المحادثة.",
+                                                       @"Could not verify this chat.")
                  title:mxPurgeText(@"الحذف غير متاح حالياً", @"Deletion unavailable") context:ctx];
         return;
     }
