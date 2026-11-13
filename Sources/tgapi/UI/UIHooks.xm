@@ -137,30 +137,6 @@ static __attribute__((unused)) NSString *mxLocalizedRowName(NSString *key, NSStr
     return str;
 }
 
-// Reports every settings row that carries an accessibility label, with the node
-// it hangs off. The one thing that decides whether the tweak can be opened at
-// all is what that label actually says in the host app — guessing at it is what
-// left the Chinese Turrit build and iMe with no way in.
-//
-// os_log, not customLog2: customLog2 writes to a file inside the app sandbox
-// that a tethered Mac cannot read, so a probe written with it reports nothing
-// and its silence looks like a negative result.
-//
-// Bounded, because settings screens set labels on every scroll pass.
-static void mxDiagSettingsRow(NSString *label, NSString *parentClass) {
-#if MX_DIAG
-    static NSMutableSet *seen = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{ seen = [NSMutableSet set]; });
-    @synchronized(seen) {
-        if (seen.count >= 80 || [seen containsObject:label]) return;
-        [seen addObject:label];
-    }
-    mxDiag("settings-row label=%{public}s parent=%{public}s",
-           label.UTF8String, parentClass.UTF8String);
-#endif
-}
-
 void showUI();
 
 // Defined further down, next to the rest of the edit-history code. Declared
