@@ -279,26 +279,100 @@ final class MxPurgeCodec: NSObject {
         return call.1.makeData() as NSData
     }
 
+    // Telegram messages.search replies include users/chats/topics after the
+    // message vector. Recent VoidGram schemas may have new constructors in
+    // those trailing vectors, even when every message parses correctly.
+    // Don't let unrelated participant metadata block per-chat message lookup.
+    // The request is already server-filtered to this peer and inputPeerSelf.
+    private static func idsInMessages(_ messages: [Api.Message]) -> [NSNumber] {
+        var ids: [NSNumber] = []
+        for message in messages {
+            if case let .message(d) = message, d.id > 0,
+               (d.flags & (1 << 1)) != 0 {
+                ids.append(NSNumber(value: d.id))
+            }
+        }
+        return ids
+    }
+
+    // Read only the message vector from a trusted messages.search response.
+    // No guessing by scanning arbitrary bytes for a matching message ID.
+    private static func partialSearchResult(_ data: Data) -> NSDictionary? {
+        let r = BufferReader(Buffer(data: data))
+        guard let constructor = r.readInt32() else { return nil }
+        switch constructor {
+        case 494135274: // messages.messages: vector starts immediately
+            break
+        case 1595959062: // messages.messagesSlice
+            guard let flags = r.readInt32(), r.readInt32() != nil else { return nil }
+            if (flags & 1) != 0 && r.readInt32() == nil { return nil }
+            if (flags & (1 << 2)) != 0 && r.readInt32() == nil { return nil }
+            if (flags & (1 << 3)) != 0 {
+                guard let sig = r.readInt32(),
+                      Api.parse(r, signature: sig) is Api.SearchPostsFlood else { return nil }
+            }
+        case -948520370: // messages.channelMessages
+            guard let flags = r.readInt32(),
+                  r.readInt32() != nil, r.readInt32() != nil else { return nil }
+            if (flags & (1 << 2)) != 0 && r.readInt32() == nil { return nil }
+        default:
+            return nil
+        }
+        guard r.readInt32() == 481674261,
+              let count = r.readInt32(),
+              count >= 0 && count <= 100 else { return nil }
+        if count == 0 {
+            return ["ids": [NSNumber](), "returned": 0, "partialVector": true]
+        }
+        let firstOffset = Int(r.offset)
+        var ids: [NSNumber] = []
+        for _ in 0..<Int(count) {
+            guard let sig = r.readInt32(),
+                  let parsed = Api.parse(r, signature: sig) as? Api.Message else {
+                // If the host has a newer message body than our bundled
+                // parser, read ONLY the first outgoing message id at its
+                // fixed position. Never interpret unknown constructors.
+                let first = BufferReader(Buffer(data: data))
+                first.skip(firstOffset)
+                guard let firstSig = first.readInt32(),
+                      firstSig == 1979759059,
+                      let flags = first.readInt32(),
+                      first.readInt32() != nil,
+                      let id = first.readInt32(), id > 0,
+                      (flags & (1 << 1)) != 0 else { return nil }
+                return ["ids": [NSNumber(value: id)],
+                        "returned": 1, "partialVector": true]
+            }
+            if case let .message(d) = parsed, d.id > 0,
+               (d.flags & (1 << 1)) != 0 {
+                ids.append(NSNumber(value: d.id))
+            }
+        }
+        // Only return an empty result if the server really sent an empty
+        // vector. Nonempty vectors without outgoing messages are unsupported,
+        // not evidence that there are no messages left from this account.
+        guard !ids.isEmpty else { return nil }
+        return ["ids": ids, "returned": count, "partialVector": true]
+    }
+
     @objc(searchResult:)
     static func searchResult(_ data: NSData) -> NSDictionary? {
         guard let bytes = unpack(data) else { return nil }
         let r = BufferReader(Buffer(data: bytes))
-        guard let sign = r.readInt32(),
-              let response = Api.parse(r, signature: sign) as? Api.messages.Messages else { return nil }
-        let messages: [Api.Message]
-        switch response {
-        case let .messages(d): messages = d.messages
-        case let .messagesSlice(d): messages = d.messages
-        case let .channelMessages(d): messages = d.messages
-        default: return nil
-        }
-        var ids: [NSNumber] = []
-        for message in messages {
-            if case let .message(d) = message, d.id > 0 {
-                ids.append(NSNumber(value: d.id))
+        if let sign = r.readInt32(),
+           let response = Api.parse(r, signature: sign) as? Api.messages.Messages {
+            let messages: [Api.Message]
+            switch response {
+            case let .messages(d): messages = d.messages
+            case let .messagesSlice(d): messages = d.messages
+            case let .channelMessages(d): messages = d.messages
+            default: return nil
             }
+            let ids = idsInMessages(messages)
+            if !messages.isEmpty && ids.isEmpty { return nil }
+            return ["ids": ids, "returned": messages.count]
         }
-        return ["ids": ids, "returned": messages.count]
+        return partialSearchResult(bytes)
     }
 
     @objc(makeDeleteForPeer:ids:)

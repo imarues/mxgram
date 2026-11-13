@@ -206,7 +206,11 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         button.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.98];
         button.exclusiveTouch = YES;
         button.userInteractionEnabled = YES;
-        [button addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
+        // VoidGram's chat view installs pan/swipe recognizers over the whole
+        // surface. They may cancel TouchUpInside before it reaches a floating
+        // control. TouchDown fires immediately; it never deletes directly,
+        // it only opens the verification/confirmation UI.
+        [button addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchDown];
         ctx.button = button;
     }
     [self style:ctx];
@@ -379,19 +383,23 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         return;
     }
     if (ctx.verifiedEmpty) {
-        [self message:mxPurgeText(@"تم التحقق: لا توجد رسائل مرسلة منك يمكن العثور عليها في هذه المحادثة.",
-                                  @"Verified: no messages sent by you were found in this chat.")
+        [self message:mxPurgeText(@"السلة الخضراء تعني أن بحث تيليجرام لم يجد رسائل مرسلة منك في هذه المحادثة. ماكو شي ينحذف.",
+                                  @"Green means Telegram found no messages sent by you in this chat. Nothing to delete.")
                  title:mxPurgeText(@"لا توجد رسائل", @"No messages found") context:ctx];
         return;
     }
     if (!ctx.scanned || ![self stillCurrent:ctx]) {
-        // Retry verification when possible, but never bypass it to delete.
+        // Always explain gray (unverified). Retry only if we have the verified
+        // chat/account prerequisites. Never infer IDs from visible message UI.
+        NSString *reason = ctx.failureReason ?: mxPurgeText(
+            @"السلة الرمادية تعني أن التحقق لم يكتمل، ولم يبدأ أي حذف.",
+            @"Gray means verification has not finished. Nothing has been deleted.");
+        [self message:reason
+                 title:mxPurgeText(@"السلة بحاجة للتحقق", @"Trash needs verification")
+               context:ctx];
         if (!ctx.busy && ctx.peerKey.length && ctx.accountId.longLongValue > 0) {
             [self lookupContext:ctx];
         }
-        [self message:ctx.failureReason ?: mxPurgeText(@"تعذّر التحقق من هذه المحادثة.",
-                                                       @"Could not verify this chat.")
-                 title:mxPurgeText(@"الحذف غير متاح حالياً", @"Deletion unavailable") context:ctx];
         return;
     }
     NSString *chat = ctx.controller.navigationItem.title ?: ctx.controller.title ?: ctx.peerKey;
