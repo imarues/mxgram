@@ -1,6 +1,7 @@
 #import "Headers.h"
 #import "../GhostExceptions.h"
 #import "../Headers.h"
+#import "../MxPurge.h"
 #import "../Logger/Logger.h"
 #import "Icons.h"
 #import <Foundation/Foundation.h>
@@ -573,7 +574,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
     // section never renders as a bare header.
     return MAX((NSInteger)[MxGhostExceptions all].count, 1);
   case MISC:
-    return 12;
+    return 13;
   case FILE_FIXER:
     return 2;
   case FAKE_LOCATION:
@@ -915,6 +916,16 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       cell.imageView.tintColor = [self dynamicColorBW];
       cell.textLabel.text = TGLoc(@"VIDEO_TO_VOICE_TITLE");
       cell.detailTextLabel.text = TGLoc(@"VIDEO_TO_VOICE_SUBTITLE");
+    } else if (indexPath.row == 12) {
+      // Extra, opt-in action. The red/orange/green trash appears in the
+      // currently open conversation only when this setting is enabled.
+      cell.imageView.image = [UIImage systemImageNamed:@"trash.fill"];
+      cell.imageView.tintColor = [UIColor systemRedColor];
+      BOOL ar = [TGLoc(@"CANCEL") isEqualToString:@"إلغاء"];
+      cell.textLabel.text = ar ? @"حذف كل رسائلي" : @"Delete My Messages";
+      cell.detailTextLabel.text = ar
+          ? @"إظهار سلة في كل محادثة لحذف رسائلك أنت فقط من تلك المحادثة، بعد التأكيد."
+          : @"Show a trash button in each chat to delete only your messages in that chat, after confirmation.";
     }
 
     UISwitch *toggle = (UISwitch *)cell.accessoryView;
@@ -1368,6 +1379,9 @@ static NSString *const kMxTweakVersion = @"1.0.0";
     
     [[NSUserDefaults standardUserDefaults] setBool:sender.isOn
                                             forKey:switchKey];
+    if ([switchKey isEqualToString:kDeleteMyMessages]) {
+      MxPurgeSettingsChanged();
+    }
     // Names the key each row actually writes — the quickest way to catch a
     // section/row mapping that has drifted out of step with the labels.
     mxDiag("switch section=%ld row=%ld key=%{public}@ value=%d",
@@ -1434,6 +1448,8 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       return kHideDisappearingLabel;
     case 10:
       return kVideoToVoice;
+    case 12:
+      return kDeleteMyMessages;
     default:
       // Row 9 is Download Speed Boost, a multi-choice row rather than a switch.
       return nil;
