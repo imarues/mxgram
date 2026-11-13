@@ -6,6 +6,10 @@
 #import "UI/Headers.h"
 #import <objc/runtime.h>
 
+@interface MTRpcError (MxPurgeError)
+@property (nonatomic, readonly) NSString *errorDescription;
+@end
+
 @interface MxPurgeCodec : NSObject
 + (NSDictionary *)peerFromRequest:(NSData *)payload;
 + (NSString *)chatKeyForController:(id)controller;
@@ -166,7 +170,7 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         controller.navigationItem.rightBarButtonItems = items;
     }
     [self style:ctx];
-    [self lookupContext:ctx];
+    if (!ctx.scanned) [self lookupContext:ctx];
 }
 - (void)disappeared:(UIViewController *)controller {
     MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
@@ -186,7 +190,7 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         else color = [UIColor systemRedColor];
     }
     ctx.button.tintColor = color;
-    ctx.button.enabled = !ctx.busy && ctx.scanned && !ctx.verifiedEmpty && !ctx.cancelled;
+    ctx.button.enabled = !ctx.busy && !ctx.verifiedEmpty && !ctx.cancelled;
     ctx.button.alpha = ctx.button.enabled ? 1.0 : 0.70;
 }
 - (void)message:(NSString *)message title:(NSString *)title context:(MxPurgeContext *)ctx {
@@ -232,9 +236,14 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
     });
 }
 - (BOOL)stillCurrent:(MxPurgeContext *)ctx {
-    return [self enabled] && ctx && !ctx.cancelled &&
-        self.visibleChat == ctx.controller && ctx.controller.view.window &&
-        ctx.service && ctx.peerData.length && ctx.accountId.longLongValue > 0;
+    UIViewController *vc = ctx.controller;
+    if (![self enabled] || !ctx || ctx.cancelled || self.visibleChat != vc ||
+        !vc.view.window || !ctx.service || !ctx.peerData.length ||
+        ctx.accountId.longLongValue <= 0) return NO;
+    // ChatControllerImpl may reuse the same UIViewController for a different
+    // location. Never continue an old chat's job after a navigation change.
+    if (objc_getAssociatedObject(vc, kMxPurgeContextKey) != ctx) return NO;
+    return [[MxPurgeCodec chatKeyForController:vc] isEqualToString:ctx.peerKey];
 }
 - (void)lookupContext:(MxPurgeContext *)ctx {
     if (!ctx || ctx.busy || ctx.cancelled || !ctx.accountId || ![self enabled]) return;
@@ -264,8 +273,9 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
             NSDictionary *parsed = searchError ? nil : [MxPurgeCodec searchResult:data];
             if (parsed) {
                 NSUInteger count = [parsed[@"ids"] count];
+                NSUInteger returned = [parsed[@"returned"] unsignedIntegerValue];
                 ctx.scanned = YES;
-                ctx.verifiedEmpty = count == 0;
+                ctx.verifiedEmpty = count == 0 && returned == 0;
                 if (ctx.verifiedEmpty) ctx.partial = NO;
             } else {
                 ctx.scanned = NO;
@@ -276,8 +286,14 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
 }
 - (void)tapped:(UIButton *)button {
     MxPurgeContext *ctx = objc_getAssociatedObject(self.visibleChat, kMxPurgeContextKey);
-    if (!ctx || ctx.button != button || ![self stillCurrent:ctx] ||
-        !ctx.scanned || ctx.verifiedEmpty || ctx.busy) return;
+    if (!ctx || ctx.button != button || ctx.busy) return;
+    if (!ctx.scanned || ![self stillCurrent:ctx]) {
+        [self message:mxPurgeText(@"تعذّر التحقق من المحادثة والحساب الحالي أو الاتصال بالخادم. افتح المحادثة من جديد وحاول.",
+                                  @"Could not verify this chat, account or server connection. Reopen the chat and try again.")
+                 title:mxPurgeText(@"الحذف غير متاح حالياً", @"Deletion unavailable") context:ctx];
+        return;
+    }
+    if (ctx.verifiedEmpty) return;
     NSString *chat = ctx.controller.navigationItem.title ?: ctx.controller.title ?: ctx.peerKey;
     NSString *title = mxPurgeText(@"حذف كل رسائلي", @"Delete My Messages");
     NSString *description = mxPurgeText(
@@ -329,6 +345,11 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         NSDictionary *result = error ? nil : [MxPurgeCodec searchResult:response];
         if (!result) { [self finish:ctx fully:NO detail:error]; return; }
         NSArray<NSNumber *> *ids = result[@"ids"];
+        if (!ids.count && [result[@"returned"] unsignedIntegerValue] > 0) {
+            [self finish:ctx fully:NO detail:mxPurgeText(@"بعض الرسائل لا يمكن حذفها بهذه الطريقة.",
+                                                         @"Some service messages cannot be deleted.")];
+            return;
+        }
         if (!ids.count) {
             // Search again after a brief settle period. A successful delete
             // request alone is NOT evidence that all messages are gone.
@@ -338,7 +359,8 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
                 NSData *check = [MxPurgeCodec makeSearchForPeer:ctx.peerData offset:0 limit:2];
                 [self send:check service:ctx.service done:^(NSData *verified, NSString *checkError) {
                     NSDictionary *last = checkError ? nil : [MxPurgeCodec searchResult:verified];
-                    BOOL clear = last && [last[@"ids"] count] == 0;
+                    BOOL clear = last && [last[@"ids"] count] == 0 &&
+                                 [last[@"returned"] unsignedIntegerValue] == 0;
                     [self finish:ctx fully:clear detail:checkError];
                 }];
             });
