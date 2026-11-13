@@ -209,7 +209,14 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         if (done) done(nil, @"No authenticated request service or invalid peer.");
         return;
     }
-    MTRequest *request = [MTRequest new];
+    // MTRequest is provided by the host Telegram binary at runtime. A direct
+    // [MTRequest new] emits an undefined link-time class symbol in injected dylibs.
+    Class requestClass = objc_getClass("MTRequest");
+    if (!requestClass) {
+        if (done) done(nil, @"Telegram MTRequest class unavailable.");
+        return;
+    }
+    MTRequest *request = [(id)requestClass new];
     MxPurgePending *pending = [MxPurgePending new];
     [request setPayload:data metadata:@"MxPurge" shortMetadata:@"MxPurge"
          responseParser:^id(NSData *response) { return response; }];
