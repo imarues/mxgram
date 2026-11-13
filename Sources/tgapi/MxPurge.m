@@ -19,6 +19,7 @@
 + (NSNumber *)selfIdFromResponse:(NSData *)data;
 + (NSData *)makeSearchForPeer:(NSData *)peer offset:(int32_t)offset limit:(int32_t)limit;
 + (NSDictionary *)searchResult:(NSData *)data;
++ (NSString *)searchResponseDiagnostic:(NSData *)data;
 + (NSData *)makeDeleteForPeer:(NSData *)peer ids:(NSArray<NSNumber *> *)ids;
 + (BOOL)deleteSucceeded:(NSData *)data;
 @end
@@ -352,11 +353,14 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
                 if (ctx.verifiedEmpty) ctx.partial = NO;
             } else {
                 ctx.scanned = NO;
+                NSString *diagnostic = data.length
+                    ? [MxPurgeCodec searchResponseDiagnostic:data]
+                    : @"No response payload";
                 ctx.failureReason = searchError.length
                     ? [NSString stringWithFormat:mxPurgeText(@"رفض الخادم البحث: %@",
                                                              @"Server rejected the search: %@"), searchError]
-                    : mxPurgeText(@"تعذّر تحليل جواب البحث من تيليجرام.",
-                                  @"Telegram returned a search response that could not be parsed.");
+                    : [NSString stringWithFormat:mxPurgeText(@"تعذّر تحليل جواب البحث من تيليجرام (%@).",
+                                                             @"Could not parse Telegram search response (%@)."), diagnostic];
             }
             [self style:ctx];
         }];

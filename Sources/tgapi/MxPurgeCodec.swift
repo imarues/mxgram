@@ -6,17 +6,61 @@ import tgapiC
 
 @objc(MxPurgeCodec)
 final class MxPurgeCodec: NSObject {
+    // A MTProto gzip_packed object is [constructor][TL bytes], NOT
+    // [constructor][raw gzip]. The TL bytes include a 1- or 4-byte length
+    // prefix and up to 3 bytes of padding. Passing those bytes to zlib
+    // made search responses from busy chats consistently fail to parse.
     private static func unpack(_ ns: NSData) -> Data? {
-        let raw = ns as Data
-        guard raw.count >= 4 else { return nil }
-        let first = raw.withUnsafeBytes { $0.load(as: Int32.self) }
-        if first != Int32(bitPattern: 0x3072CFA1) { return raw }
-        // Handle compressed search results in the same way as TLParser.
-        guard raw.count > 4 else { return nil }
-        return raw.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return nil }
-            return decompressGzip(base.advanced(by: 4), raw.count - 4) as Data?
+        var current = ns as Data
+        let maximumResponseSize = 32 * 1024 * 1024
+        guard current.count >= 4 && current.count <= maximumResponseSize else { return nil }
+        for _ in 0..<3 {
+            let reader = BufferReader(Buffer(data: current))
+            guard let constructor = reader.readInt32() else { return nil }
+            if constructor != Int32(bitPattern: 0x3072CFA1) {
+                return current
+            }
+            guard let packed = parseBytes(reader)?.makeData(),
+                  !packed.isEmpty && packed.count <= maximumResponseSize else {
+                return nil
+            }
+            guard let decompressed: Data = packed.withUnsafeBytes({ bytes -> Data? in
+                guard let base = bytes.baseAddress else { return nil }
+                return decompressGzip(base, packed.count) as Data?
+            }), decompressed.count >= 4,
+                decompressed.count <= maximumResponseSize else {
+                return nil
+            }
+            current = decompressed
         }
+        // More than three wrappers is not a normal Telegram response.
+        return nil
+    }
+
+    // Diagnostic only: display the *constructor*, not chat ids, usernames,
+    // message contents, or response bytes. Never use this as a delete fallback.
+    @objc(searchResponseDiagnostic:)
+    static func searchResponseDiagnostic(_ data: NSData) -> NSString {
+        let raw = data as Data
+        let wireReader = BufferReader(Buffer(data: raw))
+        let wireId = wireReader.readInt32()
+        guard let body = unpack(data) else {
+            let id = wireId.map { String(format: "0x%08X", UInt32(bitPattern: $0)) } ?? "none"
+            return "invalid TL/gzip payload (wire=\(id), bytes=\(raw.count))" as NSString
+        }
+        let reader = BufferReader(Buffer(data: body))
+        guard let constructor = reader.readInt32() else {
+            return "empty decompressed response" as NSString
+        }
+        let hex = String(format: "0x%08X", UInt32(bitPattern: constructor))
+        let recognized: Set<Int32> = [494135274, 1595959062, -948520370, 1951620897]
+        if !recognized.contains(constructor) {
+            return "unexpected Telegram response constructor \(hex)" as NSString
+        }
+        if constructor == 1951620897 {
+            return "messagesNotModified (unexpected for hash=0)" as NSString
+        }
+        return "known \(hex) response, but nested Telegram API fields could not be parsed" as NSString
     }
 
     private static func readPeer(_ data: Data) -> Api.InputPeer? {
