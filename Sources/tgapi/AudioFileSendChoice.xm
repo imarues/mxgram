@@ -21,7 +21,7 @@ static char kKiraAudioPickHandledKey;
 static IMP kiraInheritedOriginalIMP(Class cls, const void *key) {
     for (Class cur = cls; cur != Nil; cur = class_getSuperclass(cur)) {
         NSValue *wrapped = objc_getAssociatedObject((id)cur, key);
-        if (wrapped) return [wrapped pointerValue];
+        if (wrapped) return reinterpret_cast<IMP>([wrapped pointerValue]);
     }
     return NULL;
 }
@@ -354,13 +354,13 @@ static void kiraInstallPickerDelegateHooks(Class cls) {
             !objc_getAssociatedObject((id)cls, &kKiraAudioPickManyIMPKey)) {
             IMP original = method_setImplementation(method, (IMP)kiraDidPickMany);
             objc_setAssociatedObject((id)cls, &kKiraAudioPickManyIMPKey,
-                                     [NSValue valueWithPointer:original],
+                                     [NSValue valueWithPointer:reinterpret_cast<const void *>(original)],
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         } else if (sel_isEqual(selector, @selector(documentPicker:didPickDocumentAtURL:)) &&
                    !objc_getAssociatedObject((id)cls, &kKiraAudioPickOneIMPKey)) {
             IMP original = method_setImplementation(method, (IMP)kiraDidPickOne);
             objc_setAssociatedObject((id)cls, &kKiraAudioPickOneIMPKey,
-                                     [NSValue valueWithPointer:original],
+                                     [NSValue valueWithPointer:reinterpret_cast<const void *>(original)],
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
     }
