@@ -2535,7 +2535,10 @@ class TLParser: NSObject {
             // documentAttributeAudio; leave other file uploads unchanged.
             diag("v2v wire: \(names) -> voice, \(upload.duration)s")
             newAttributes = [voiceAttribute(upload)]
-            newMimeType = "audio/mp4"
+            // Native Ogg/Opus voice must retain audio/ogg; converted
+            // M4A media (video audio or Vorbis) remains audio/mp4.
+            let oggOpus = names.contains { $0.lowercased().hasSuffix(".ogg") }
+            newMimeType = oggOpus ? "audio/ogg" : "audio/mp4"
 
         }
 

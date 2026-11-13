@@ -10,6 +10,7 @@
 #import <objc/message.h>
 #import <math.h>
 #import "Headers.h"
+#import "KiraOggSupport.h"
 
 typedef void (*KiraOriginalPickMany)(id, SEL, UIDocumentPickerViewController *, NSArray<NSURL *> *);
 typedef void (*KiraOriginalPickOne)(id, SEL, UIDocumentPickerViewController *, NSURL *);
@@ -168,10 +169,6 @@ static void kiraPresentAudioChoice(id delegate,
             });
 
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                AVURLAsset *asset = [AVURLAsset URLAssetWithURL:source options:nil];
-                NSArray *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
-                BOOL audioOnly = audioTracks.count > 0 &&
-                                 [asset tracksWithMediaType:AVMediaTypeVideo].count == 0;
                 NSString *dir = [NSTemporaryDirectory()
                     stringByAppendingPathComponent:[NSString stringWithFormat:
                         @"KiraAudioVoice/%@", [NSUUID UUID].UUIDString]];
@@ -181,6 +178,52 @@ static void kiraPresentAudioChoice(id delegate,
                 NSURL *output = [NSURL fileURLWithPath:
                     [dir stringByAppendingPathComponent:
                         [NSString stringWithFormat:@"%@.m4a", [NSUUID UUID].UUIDString]]];
+
+                // Telegram supports Opus-in-Ogg as a native voice format:
+                // copy its bytes to a unique .ogg and register real voice
+                // metadata, without attempting an unsupported iOS conversion.
+                NSString *ext = source.pathExtension.lowercaseString;
+                BOOL oggContainer = [@[@"ogg", @"oga", @"opus"] containsObject:ext];
+                NSURL *conversionSource = source;
+                if (oggContainer) {
+                    NSInteger opusDuration = 0;
+                    if (KiraOggOpusDuration(source, &opusDuration)) {
+                        NSURL *oggOutput = [NSURL fileURLWithPath:
+                            [dir stringByAppendingPathComponent:
+                                [NSString stringWithFormat:@"%@.ogg", [NSUUID UUID].UUIDString]]];
+                        NSError *copyError = nil;
+                        if ([[NSFileManager defaultManager] copyItemAtURL:source
+                                                                  toURL:oggOutput error:&copyError]) {
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                void (^sendOgg)(void) = ^{
+                                    if (completed) return;
+                                    [TLParser registerVoiceUploadWithFileName:oggOutput.lastPathComponent
+                                                                     duration:opusDuration
+                                                                     waveform:nil];
+                                    forward(oggOutput);
+                                };
+                                if (progress.presentingViewController) {
+                                    [progress dismissViewControllerAnimated:YES completion:sendOgg];
+                                } else {
+                                    sendOgg();
+                                }
+                            });
+                            return;
+                        }
+                        // Never mislabelel Opus bytes as M4A on copy errors.
+                        conversionSource = nil;
+                    } else {
+                        // Ogg/OGA may contain Vorbis. Stream-decode to WAV,
+                        // then use Apple's existing M4A/AAC exporter.
+                        conversionSource = KiraDecodeOggVorbisToWAV(source, dir);
+                    }
+                }
+
+                AVURLAsset *asset = conversionSource
+                    ? [AVURLAsset URLAssetWithURL:conversionSource options:nil] : nil;
+                NSArray *audioTracks = asset ? [asset tracksWithMediaType:AVMediaTypeAudio] : @[];
+                BOOL audioOnly = audioTracks.count > 0 &&
+                                 [asset tracksWithMediaType:AVMediaTypeVideo].count == 0;
                 AVAssetExportSession *exporter = audioOnly
                     ? [[AVAssetExportSession alloc] initWithAsset:asset
                                                       presetName:AVAssetExportPresetAppleM4A]
