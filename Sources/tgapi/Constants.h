@@ -115,6 +115,6 @@
 
 // The two addresses this tweak reaches out to. Kept here so both the settings
 // screen and the first-run welcome alert open the same channel.
-#define kMxChannelURL @"https://t.me/m1ronx"
-#define kMxAnnouncementsURL                                                    \
-  @"https://raw.githubusercontent.com/m1ronx/mx/main/announcements.json"
+#define kKiraChannelURL @"https://t.me/iKiraPlus"
+#define kKiraAnnouncementsURL                                                    \
+  @"https://raw.githubusercontent.com/imarues/mxgram/main/announcements.json"

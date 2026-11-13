@@ -464,10 +464,10 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   }
 }
 
-#pragma mark - Mx Announcements
+#pragma mark - Kira Announcements
 
 - (void)fetchAnnouncement {
-  NSURL *url = [NSURL URLWithString:kMxAnnouncementsURL];
+  NSURL *url = [NSURL URLWithString:kKiraAnnouncementsURL];
   NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
   req.timeoutInterval = 10;
   // Cache policy to ensure we get fresh data
@@ -1100,7 +1100,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
 
   if (indexPath.section == CREDITS) {
     if (indexPath.row == 0) {
-      NSURL *url = [NSURL URLWithString:kMxChannelURL];
+      NSURL *url = [NSURL URLWithString:kKiraChannelURL];
       if ([[UIApplication sharedApplication] canOpenURL:url]) {
         [[UIApplication sharedApplication] openURL:url
                                            options:@{}
