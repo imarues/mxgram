@@ -1,7 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "Headers.h"
 #import "../Logger/Logger.h"
-#import "../MxPurge.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -96,71 +95,29 @@ static BOOL mxLabelMatchesLocalizedKey(NSString *lower, NSString *key, BOOL twoW
 // English and Russian phrases — which is what this used to do — left the Chinese
 // build with no way in.
 static BOOL mxLabelIsSupportRow(NSString *label) {
-    if (label.length == 0) return NO;
-    NSString *lower = [label lowercaseString];
+    if (!label.length) return NO;
+    NSString *lower = [[label lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
-    // Forks that rename the row. Brand names are not translated.
-    if ([lower containsString:@"turrit"]) return YES;
-    if ([lower containsString:@"leadgram"]) return YES;
-    if ([lower containsString:@"swiftgram"]) return YES;
-
-    // iMe does not reuse Telegram's wording: measured on 12.2.7 its row reads
-    // "Support", which matches neither the phrases below nor Settings.Support
-    // ("Ask a Question") that the lookup at the bottom compares against.
-    if ([lower isEqualToString:@"support"]) return YES;
-
-    // VoidGram and Arabic Telegram expose the same support action as
-    // "اسأل سؤالاً" (with optional diacritics) or "اطرح سؤالاً".
-    // Match its distinctive two-word phrase even when host localization
-    // is not initialized when the accessibility label first arrives.
-    if ([lower containsString:@"اسأل سؤال"] ||
-        [lower containsString:@"اسال سؤال"] ||
-        [lower containsString:@"اطرح سؤال"]) return YES;
-
-    // A second way in, because the first one does not always work.
-    //
-    // iMe's Support row opens a context menu of its own on long press, and that
-    // menu is not built on a UILongPressGestureRecognizer — measured, the only
-    // long-press recogniser within five levels of the row is the scroll bar's.
-    // So there is nothing to make yield, and the tweak never sees the gesture.
-    //
-    // The gift row carries no such menu. Both rows stay recognised: whichever
-    // one the host leaves alone is the one that works.
-    //
-    // These two literals are only what was measured on an English and a
-    // Vietnamese build. Listing them is not enough — an iMe running in Russian
-    // or Chinese would have had no way into the tweak at all — so the real
-    // test is the Settings.SendGift lookup further down, which covers every
-    // language the host ships. The literals stay as a floor for the case where
-    // LegacyComponentsGlobals is not reachable and the lookup returns nothing.
-    if ([lower isEqualToString:@"send a gift"]) return YES;
-    if ([lower isEqualToString:@"tặng quà"]) return YES;
-
-    // Telegram's own wording, for the languages worth not paying a lookup for.
-    static NSArray *known = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        known = @[
-            @"ask a question", @"задать вопрос",
-            @"hacer una pregunta", @"poser une question",
-            @"stellen sie eine frage", @"fai una domanda", @"bir soru sor",
-            @"질문하기", @"提问", @"提問",
-            @"質問する", @"đặt câu hỏi"
+    // Different Telegram languages use different words, but the only entry
+    // point is the Ask a Question item. Never bind the gift row, profile,
+    // generic Support, or any other Settings item.
+    static NSArray<NSString *> *phrases;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        phrases = @[
+            @"ask a question", @"задать вопрос", @"hacer una pregunta",
+            @"poser une question", @"stellen sie eine frage", @"fai una domanda",
+            @"bir soru sor", @"질문하기", @"提问", @"提問",
+            @"質問する", @"đặt câu hỏi", @"اسأل سؤالاً", @"اسأل سؤالا",
+            @"اسال سؤالا", @"اطرح سؤالاً", @"اطرح سؤالا"
         ];
     });
-    for (NSString *s in known) {
-        if ([lower containsString:s]) return YES;
+    for (NSString *phrase in phrases) {
+        if ([lower isEqualToString:phrase]) return YES;
     }
-
-    // The gift row in whatever language the host is running in. One-way, because
-    // a match here only needs to be right — nothing is lost by missing a row
-    // that some fork shortened, and a great deal is lost by claiming a row that
-    // merely contains the word for "gift".
-    if (mxLabelMatchesLocalizedKey(lower, @"Settings.SendGift", NO)) return YES;
-
-    // Anything else: ask the running localisation. Compared both ways because a
-    // fork may shorten the row ("Support" under "Support & FAQ") or pad it.
-    return mxLabelMatchesLocalizedKey(lower, @"Settings.Support", YES);
+    // Host Telegram's live localization covers languages not listed above.
+    return mxLabelMatchesLocalizedKey(lower, @"Settings.Support", NO);
 }
 
 // Which app is this dylib running inside? Only the first-run instructions need
@@ -264,99 +221,81 @@ static void updateMxEditBadge(ASDisplayNode *node, NSNumber *msgId, NSNumber *pe
 // anywhere in the tree. objc_getClass returned nil for both, so %init simply
 // skipped them.
 
-static BOOL _mxGestureAttached = NO;
-static BOOL _mxTapAttached = NO;
-static const void *kMxSupportTapAssociation = &kMxSupportTapAssociation;
+// One recognizer per localized Ask-a-Question row. Ordinary taps are never
+// intercepted: they retain Telegram's normal Support action.
+static BOOL _kiraLongPressAttached = NO;
+static const void *kKiraLongPressKey = &kKiraLongPressKey;
 
-// Helper target object for late-attached gestures
-@interface MxGestureTarget : NSObject
+@interface KiraSupportGestureTarget : NSObject
 @end
-@implementation MxGestureTarget
-- (void)handleLongPress:(UILongPressGestureRecognizer *)gr {
-    if (gr.state == UIGestureRecognizerStateBegan) showUI();
-}
-- (void)handleTap:(UITapGestureRecognizer *)gr {
-    if (gr.state == UIGestureRecognizerStateEnded) showUI();
+@implementation KiraSupportGestureTarget
+- (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state == UIGestureRecognizerStateBegan) showUI();
 }
 @end
-static MxGestureTarget *_mxGestureTarget = nil;
+static KiraSupportGestureTarget *_kiraGestureTarget = nil;
 
-static void tryAttachMxGesture(void);
+static void kiraAttachSupportLongPress(UIView *row, NSString *label) {
+    if (!row || !mxLabelIsSupportRow(label) ||
+        objc_getAssociatedObject(row, kKiraLongPressKey)) return;
+    if (!_kiraGestureTarget) _kiraGestureTarget = [KiraSupportGestureTarget new];
+    UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:_kiraGestureTarget action:@selector(handleLongPress:)];
+    gesture.minimumPressDuration = 0.6;
+    gesture.cancelsTouchesInView = YES;
+    gesture.delaysTouchesBegan = NO;
+    gesture.delaysTouchesEnded = NO;
+    // If Telegram offers its own long-press context menu for this row,
+    // let the Kira recognizer win. No tap recognizers are added or altered.
+    UIView *scan = row;
+    for (int depth = 0; scan && depth < 5; depth++, scan = scan.superview) {
+        for (UIGestureRecognizer *existing in scan.gestureRecognizers) {
+            if ([existing isKindOfClass:[UILongPressGestureRecognizer class]]) {
+                [existing requireGestureRecognizerToFail:gesture];
+            }
+        }
+    }
+    [row addGestureRecognizer:gesture];
+    objc_setAssociatedObject(row, kKiraLongPressKey, gesture,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    _kiraLongPressAttached = YES;
+    mxDiag("Kira Ask a Question long press attached: %{public}s", label.UTF8String);
+}
+
+static void tryAttachMxGestureInView(UIView *view) {
+    if (!view) return;
+    if ([NSStringFromClass([view class]) containsString:@"AccessibilityAreaNode"]) {
+        NSString *label = view.accessibilityLabel;
+        if (mxLabelIsSupportRow(label)) {
+            kiraAttachSupportLongPress(view.superview ?: view, label);
+        }
+    }
+    for (UIView *sub in view.subviews) {
+        tryAttachMxGestureInView(sub);
+    }
+}
+static void tryAttachMxGesture(void) {
+    UIWindow *window = UIApplication.sharedApplication.keyWindow;
+    if (window) tryAttachMxGestureInView(window);
+}
 
 %hook TGLocalization
 - (id)get:(id)key {
     TGLocalizationShared = self;
-    if (!_mxGestureAttached || !_mxTapAttached) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            tryAttachMxGesture();
-        });
+    if (!_kiraLongPressAttached) {
+        dispatch_async(dispatch_get_main_queue(), ^{ tryAttachMxGesture(); });
     }
     return %orig;
 }
-
 - (id)initWithVersion:(int)a code:(id)b dict:(id)c isActive:(BOOL)d {
     TGLocalization *instance = %orig;
     if (instance) {
         TGLocalizationShared = instance;
-        // Settings may already be rendered — try to attach gesture now
-        if (!_mxGestureAttached || !_mxTapAttached) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                tryAttachMxGesture();
-            });
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{ tryAttachMxGesture(); });
     }
     return instance;
 }
 %end
-
-static void tryAttachMxGestureInView(UIView *view) {
-    if (!view) return;
-    if ([NSStringFromClass([view class]) isEqualToString:@"Display.AccessibilityAreaNode"]) {
-        NSString *label = view.accessibilityLabel;
-        if (mxLabelIsSupportRow(label)) {
-            UIView *parent = view.superview ?: view;
-            if (!_mxGestureTarget) _mxGestureTarget = [MxGestureTarget new];
-            // The normal support-row tap must open Mx. A long press is still
-            // accepted as a fallback, but it is no longer the only way in.
-            if (!objc_getAssociatedObject(parent, kMxSupportTapAssociation)) {
-                UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
-                    initWithTarget:_mxGestureTarget action:@selector(handleTap:)];
-                tap.numberOfTapsRequired = 1;
-                tap.cancelsTouchesInView = YES;
-                [parent addGestureRecognizer:tap];
-                objc_setAssociatedObject(parent, kMxSupportTapAssociation, tap,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-            _mxTapAttached = YES;
-            BOOL alreadyHas = NO;
-            for (UIGestureRecognizer *g in parent.gestureRecognizers) {
-                if ([g isKindOfClass:[UILongPressGestureRecognizer class]]) {
-                    alreadyHas = YES; break;
-                }
-            }
-            if (!alreadyHas) {
-                UILongPressGestureRecognizer *gr = [[UILongPressGestureRecognizer alloc]
-                    initWithTarget:_mxGestureTarget action:@selector(handleLongPress:)];
-                gr.cancelsTouchesInView = NO;
-                [parent addGestureRecognizer:gr];
-            }
-            _mxGestureAttached = YES;
-            mxDiag("Mx support row tap/long-press attached (late): %{public}s",
-                   label.UTF8String);
-        }
-        return;
-    }
-    for (UIView *sub in view.subviews) {
-        tryAttachMxGestureInView(sub);
-        if (_mxGestureAttached && _mxTapAttached) return;
-    }
-}
-
-static void tryAttachMxGesture(void) {
-    if (_mxGestureAttached && _mxTapAttached) return;
-    UIWindow *window = UIApplication.sharedApplication.keyWindow;
-    if (window) tryAttachMxGestureInView(window);
-}
 
 void showUI() {
     // Settings can be behind an already-presented controller. Presenting on
@@ -386,7 +325,7 @@ void showUI() {
     }
     UINavigationController *navVC = [[UINavigationController alloc]
         initWithRootViewController:[Mx new]];
-    mxDiag("Opening Mx from support row on %{public}s",
+    mxDiag("Opening Kira from Ask a Question long press on %{public}s",
            NSStringFromClass([presenter class]).UTF8String);
     [presenter presentViewController:navVC animated:YES completion:nil];
 }
@@ -394,7 +333,7 @@ void showUI() {
 
 
 // ============================================================
-// Long-press to open Mx menu on "Ask a Question" row.
+// Long-press to open Kira menu on "Ask a Question" row.
 //
 // Root cause of the language bug: didEnterHierarchy fires BEFORE
 // update() sets accessibilityLabel, so the label is always empty
@@ -410,118 +349,17 @@ void showUI() {
 // ============================================================
 
 %hook ASDisplayNode
-
-%property (nonatomic, strong) UILongPressGestureRecognizer *mxLongPressGesture;
-
 - (void)setAccessibilityLabel:(NSString *)label {
     %orig;
-
-    // containsString rather than an exact match: a fork is free to vend its own
-    // subclass, and the name is the only thing we can rely on here.
-    NSString *cls = NSStringFromClass([self class]);
-    if (![cls containsString:@"AccessibilityAreaNode"]) return;
-    if (!label || label.length == 0) return;
-
-    ASDisplayNode *parent = [self supernode];
-    if (!parent) return;
-    NSString *parentCls = NSStringFromClass([parent class]);
-
-    mxDiagSettingsRow(label, parentCls);
-
-    // A chat bubble also labels itself, and long-press there belongs to the
-    // message context menu. Nothing else is off limits: the label is what
-    // decides, and the parent is only somewhere to hang the gesture.
-    //
-    // This used to insist the parent be a *DisclosureItemNode. Measured on iMe,
-    // 38 of 56 settings rows hand back Display.ContextControllerSourceNode
-    // instead, so that test threw away the row we were looking for before the
-    // label was ever consulted.
-    if ([parentCls containsString:@"ChatMessage"]) return;
-
-    if (!mxLabelIsSupportRow(label)) {
-        customLog2(@"[Mx] unmatched label: %@", label);
+    if (!label.length || ![NSStringFromClass([self class]) containsString:@"AccessibilityAreaNode"])
         return;
-    }
-
-    if (!parent.mxLongPressGesture) {
-        UILongPressGestureRecognizer *gr = [[UILongPressGestureRecognizer alloc]
-            initWithTarget:parent
-                    action:@selector(__handleMxLongPress:)];
-        // The row may already long-press into a context menu of its own —
-        // Display.ContextControllerSourceNode exists for exactly that. Let the
-        // touch through so whatever the host wanted to do still happens.
-        gr.cancelsTouchesInView = NO;
-        gr.delaysTouchesBegan = NO;
-        gr.delaysTouchesEnded = NO;
-        parent.mxLongPressGesture = gr;
-    }
-
-    UIView *pv = parent.view;
-    if (pv && !objc_getAssociatedObject(pv, kMxSupportTapAssociation)) {
-        if (!_mxGestureTarget) _mxGestureTarget = [MxGestureTarget new];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
-            initWithTarget:_mxGestureTarget action:@selector(handleTap:)];
-        tap.numberOfTapsRequired = 1;
-        tap.cancelsTouchesInView = YES;
-        [pv addGestureRecognizer:tap];
-        objc_setAssociatedObject(pv, kMxSupportTapAssociation, tap,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        _mxTapAttached = YES;
-        mxDiag("MX direct tap attached: %{public}s", label.UTF8String);
-    }
-    if (pv && ![pv.gestureRecognizers containsObject:parent.mxLongPressGesture]) {
-        // The row usually long-presses into a context menu of its own. Two
-        // recognizers watching the same gesture means the host's wins and ours
-        // never fires — measured on iMe, where the gesture attached and showUI
-        // was never called once.
-        //
-        // Making the host's wait on ours, rather than adding ours and hoping,
-        // is the only arrangement where a long press reliably reaches the tweak.
-        // Taps are left alone so the row still opens on a normal press.
-        // Walk up as well as across: the context menu recogniser is not
-        // necessarily on the row's own view.
-        UIView *scan = pv;
-        for (int depth = 0; scan && depth < 5; depth++, scan = scan.superview) {
-            for (UIGestureRecognizer *existing in scan.gestureRecognizers) {
-                if (existing == parent.mxLongPressGesture) continue;
-                if (![existing isKindOfClass:[UILongPressGestureRecognizer class]]) continue;
-                [existing requireGestureRecognizerToFail:parent.mxLongPressGesture];
-                mxDiag("yielded host long-press %{public}s (depth %d) on row %{public}s",
-                       NSStringFromClass([existing class]).UTF8String, depth,
-                       label.UTF8String);
-            }
-        }
-
-        [pv addGestureRecognizer:parent.mxLongPressGesture];
-        customLog2(@"[Mx] gesture attached: %@", label);
-        mxDiag("gesture attached to row %{public}s (parent %{public}s, %lu recognizer(s), "
-               "%lu interaction(s))",
-               label.UTF8String, parentCls.UTF8String,
-               (unsigned long)pv.gestureRecognizers.count,
-               (unsigned long)pv.interactions.count);
-        // What actually competes for a long press is often a UIInteraction, not
-        // a recogniser — that is why the yield above found nothing on the row
-        // itself, and why the Support row opens iMe's menu instead of ours while
-        // the gift row, which carries none, works. Name them so the next
-        // investigation does not have to guess either.
-#if MX_DIAG
-        for (id<UIInteraction> interaction in pv.interactions) {
-            mxDiag("  row %{public}s carries interaction %{public}s",
-                   label.UTF8String, NSStringFromClass([interaction class]).UTF8String);
-        }
-#endif
-    }
+    ASDisplayNode *parent = [self supernode];
+    if (!parent || !mxLabelIsSupportRow(label)) return;
+    NSString *parentClass = NSStringFromClass([parent class]);
+    if ([parentClass containsString:@"ChatMessage"]) return;
+    kiraAttachSupportLongPress(parent.view, label);
 }
-
-%new
-- (void)__handleMxLongPress:(UILongPressGestureRecognizer *)gesture {
-    if (gesture.state == UIGestureRecognizerStateBegan) {
-        showUI();
-    }
-}
-
 %end
-
 
 
 // // ============================================================
@@ -1410,15 +1248,12 @@ static Class mxChatControllerClass(void) {
 %hook _TtC10TelegramUI18ChatControllerImpl
 - (void)viewDidLayoutSubviews {
     %orig;
-    MxPurgeChatLayout((UIViewController *)self);
 }
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
-    MxPurgeChatAppeared((UIViewController *)self);
 }
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
-    MxPurgeChatDisappeared((UIViewController *)self);
 }
 - (void)viewDidLoad {
     %orig;

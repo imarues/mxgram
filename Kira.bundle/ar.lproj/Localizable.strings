@@ -165,7 +165,7 @@
 "VIDEO_NOTE_CROP_ERROR" = "تعذّر فتح معاينة هذا الفيديو.";
 
 /* First-run alert */
-"WELCOME_BODY" = "تم تثبيت Mx.\n\nلفتح قائمة Mx:\n%@";
+"WELCOME_BODY" = "تم تثبيت Kira.\n\nلفتح قائمة Kira:\n%@";
 "WELCOME_HOWTO" = "افتح الإعدادات واضغط مطولًا على صف ”%@“.";
 "WELCOME_HOWTO_IME" = "افتح الإعدادات واضغط مطولًا على صف ”%@“.\n\nفي iMe لن يعمل صف ”%@“ — يفتح iMe قائمته الخاصة عليه.";
 "WELCOME_HOWTO_TURRIT" = "افتح الإعدادات واضغط مطولًا على صف ”About Turrit“.";

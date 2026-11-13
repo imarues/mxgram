@@ -2,7 +2,7 @@
   <img src="icon.png" width="160">
 </p>
 
-<h1 align="center">Mx</h1>
+<h1 align="center">Kira</h1>
 
 <p align="center">
   A native-feeling privacy & utility tweak for Telegram on iOS.
@@ -27,7 +27,7 @@
 
 Install the `.deb` (jailbroken) or sideload the patched IPA, then open Telegram.
 
-> **To open the Mx menu:** long-press the **"Ask a Question"** row in Telegram Settings.
+> **To open the Kira menu:** long-press the **"Ask a Question"** row in Telegram Settings.
 
 ## Features
 
@@ -100,12 +100,12 @@ Arabic · Simplified Chinese · Traditional Chinese · English · Spanish · Fre
 Requires [Theos](https://theos.dev) with an iOS 16.5 SDK.
 
 ```bash
-make package          # builds Mx.dylib and the .deb
+make package          # builds Kira.dylib and the .deb
 ```
 
-The `.dylib` is also copied to `packages/Mx.dylib` for direct sideloading.
+The `.dylib` is also copied to `packages/Kira.dylib` for direct sideloading.
 
-To regenerate the embedded translations after editing any `Mx.bundle/*.lproj/Localizable.strings`:
+To regenerate the embedded translations after editing any `Kira.bundle/*.lproj/Localizable.strings`:
 
 ```bash
 python3 generate_langs.py
@@ -131,5 +131,5 @@ This project is a fork of [Aj3radi/TGExtra](https://github.com/Aj3radi/TGExtra).
 ---
 
 <p align="center">
-  📢 Telegram channel: <a href="https://t.me/m1ronx">t.me/m1ronx</a>
+  📢 Telegram channel: <a href="https://t.me/iKiraPlus">t.me/iKiraPlus</a>
 </p>

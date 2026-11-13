@@ -167,7 +167,7 @@
 "VIDEO_NOTE_CROP_ERROR" = "Could not load this video.";
 
 /* First-run alert */
-"WELCOME_BODY" = "Mx is installed.\n\nTo open the Mx menu:\n%@";
+"WELCOME_BODY" = "Kira is installed.\n\nTo open the Kira menu:\n%@";
 "WELCOME_HOWTO" = "Open Settings and long-press the \"%@\" row.";
 "WELCOME_HOWTO_IME" = "Open Settings and long-press the \"%@\" row.\n\nIn iMe the \"%@\" row will not work — iMe opens its own menu on it.";
 "WELCOME_HOWTO_TURRIT" = "Open Settings and long-press the \"About Turrit\" row.";

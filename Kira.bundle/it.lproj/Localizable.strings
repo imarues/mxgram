@@ -157,7 +157,7 @@
 "VIDEO_TO_VOICE_NO_AUDIO" = "Questo video non ha audio: viene inviato il video";
 
 /* First-run alert */
-"WELCOME_BODY" = "Mx è installato.\n\nPer aprire il menu di Mx:\n%@";
+"WELCOME_BODY" = "Kira è installato.\n\nPer aprire il menu di Kira:\n%@";
 "WELCOME_HOWTO" = "Apri Impostazioni e tieni premuta la riga «%@».";
 "WELCOME_HOWTO_IME" = "Apri Impostazioni e tieni premuta la riga «%@».\n\nIn iMe la riga «%@» non funzionerà: iMe apre un proprio menu su di essa.";
 "WELCOME_HOWTO_TURRIT" = "Apri Impostazioni e tieni premuta la riga «About Turrit».";

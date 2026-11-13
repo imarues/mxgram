@@ -3,7 +3,7 @@
 static inline NSDictionary *GetAllTranslations(NSString *code) {
   if ([code isEqualToString:@"ar"]) {
     return @{
-      @"WELCOME_BODY" : @"تم تثبيت Mx.\n\nلفتح قائمة Mx:\n%@",
+      @"WELCOME_BODY" : @"تم تثبيت Kira.\n\nلفتح قائمة Kira:\n%@",
       @"WELCOME_HOWTO" : @"افتح الإعدادات واضغط مطولًا على صف ”%@“.",
       @"WELCOME_HOWTO_IME" : @"افتح الإعدادات واضغط مطولًا على صف ”%@“.\n\nفي iMe لن يعمل صف ”%@“ — يفتح iMe قائمته الخاصة عليه.",
       @"WELCOME_HOWTO_TURRIT" : @"افتح الإعدادات واضغط مطولًا على صف ”About Turrit“.",
@@ -165,7 +165,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"ja"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx をインストールしました。\n\nMx メニューを開くには:\n%@",
+      @"WELCOME_BODY" : @"Kira をインストールしました。\n\nKira メニューを開くには:\n%@",
       @"WELCOME_HOWTO" : @"設定を開き、「%@」の行を長押ししてください。",
       @"WELCOME_HOWTO_IME" : @"設定を開き、「%@」の行を長押ししてください。\n\niMe では「%@」の行は使えません — iMe がその行で独自のメニューを開くためです。",
       @"WELCOME_HOWTO_TURRIT" : @"設定を開き、「About Turrit」の行を長押ししてください。",
@@ -337,7 +337,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"en"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx is installed.\n\nTo open the Mx menu:\n%@",
+      @"WELCOME_BODY" : @"Kira is installed.\n\nTo open the Kira menu:\n%@",
       @"WELCOME_HOWTO" : @"Open Settings and long-press the \"%@\" row.",
       @"WELCOME_HOWTO_IME" : @"Open Settings and long-press the \"%@\" row.\n\nIn iMe the \"%@\" row will not work — iMe opens its own menu on it.",
       @"WELCOME_HOWTO_TURRIT" : @"Open Settings and long-press the \"About Turrit\" row.",
@@ -472,7 +472,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
           @"including the Telegram name and logo, belong to their respective "
           @"owners. Don't use this to break rules or violate Telegram's terms "
           @"— we're not responsible if things go sideways. Use at your own "
-          @"risk.\n\nMade by Mx Team",
+          @"risk.\n\nMade by Kira Team",
       @"ANTI_EDIT_UNAVAILABLE_SUBTITLE" : @"Unavailable on this Telegram version — edit updates cannot be read until the API layer is refreshed.",
       @"CLOSE" : @"Close",
       @"CONFIRM_CALLS_TITLE" : @"Confirm Calls",
@@ -521,7 +521,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"es"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx está instalado.\n\nPara abrir el menú de Mx:\n%@",
+      @"WELCOME_BODY" : @"Kira está instalado.\n\nPara abrir el menú de Kira:\n%@",
       @"WELCOME_HOWTO" : @"Abre Ajustes y mantén pulsada la fila «%@».",
       @"WELCOME_HOWTO_IME" : @"Abre Ajustes y mantén pulsada la fila «%@».\n\nEn iMe la fila «%@» no funcionará: iMe abre su propio menú en ella.",
       @"WELCOME_HOWTO_TURRIT" : @"Abre Ajustes y mantén pulsada la fila «About Turrit».",
@@ -698,7 +698,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"it"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx è installato.\n\nPer aprire il menu di Mx:\n%@",
+      @"WELCOME_BODY" : @"Kira è installato.\n\nPer aprire il menu di Kira:\n%@",
       @"WELCOME_HOWTO" : @"Apri Impostazioni e tieni premuta la riga «%@».",
       @"WELCOME_HOWTO_IME" : @"Apri Impostazioni e tieni premuta la riga «%@».\n\nIn iMe la riga «%@» non funzionerà: iMe apre un proprio menu su di essa.",
       @"WELCOME_HOWTO_TURRIT" : @"Apri Impostazioni e tieni premuta la riga «About Turrit».",
@@ -880,7 +880,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"cn"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx 已安装。\n\n打开 Mx 菜单:\n%@",
+      @"WELCOME_BODY" : @"Kira 已安装。\n\n打开 Kira 菜单:\n%@",
       @"WELCOME_HOWTO" : @"打开设置，长按“%@”一行。",
       @"WELCOME_HOWTO_IME" : @"打开设置，长按“%@”一行。\n\n在 iMe 中“%@”一行无效 —— iMe 会在该行打开自己的菜单。",
       @"WELCOME_HOWTO_TURRIT" : @"打开设置，长按“About Turrit”一行。",
@@ -1026,7 +1026,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"ru"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx установлен.\n\nЧтобы открыть меню Mx:\n%@",
+      @"WELCOME_BODY" : @"Kira установлен.\n\nЧтобы открыть меню Kira:\n%@",
       @"WELCOME_HOWTO" : @"Откройте Настройки и нажмите и удерживайте строку «%@».",
       @"WELCOME_HOWTO_IME" : @"Откройте Настройки и нажмите и удерживайте строку «%@».\n\nВ iMe строка «%@» не сработает — iMe открывает на ней собственное меню.",
       @"WELCOME_HOWTO_TURRIT" : @"Откройте Настройки и нажмите и удерживайте строку «About Turrit».",
@@ -1204,7 +1204,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"fr"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx est installé.\n\nPour ouvrir le menu Mx :\n%@",
+      @"WELCOME_BODY" : @"Kira est installé.\n\nPour ouvrir le menu Kira :\n%@",
       @"WELCOME_HOWTO" : @"Ouvrez les Réglages et appuyez longuement sur la ligne « %@ ».",
       @"WELCOME_HOWTO_IME" : @"Ouvrez les Réglages et appuyez longuement sur la ligne « %@ ».\n\nDans iMe, la ligne « %@ » ne fonctionnera pas : iMe y ouvre son propre menu.",
       @"WELCOME_HOWTO_TURRIT" : @"Ouvrez les Réglages et appuyez longuement sur la ligne « About Turrit ».",
@@ -1393,7 +1393,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"vn"]) {
     return @{
-      @"WELCOME_BODY" : @"Đã cài Mx.\n\nĐể mở menu Mx:\n%@",
+      @"WELCOME_BODY" : @"Đã cài Kira.\n\nĐể mở menu Kira:\n%@",
       @"WELCOME_HOWTO" : @"Mở Cài đặt rồi nhấn giữ dòng “%@”.",
       @"WELCOME_HOWTO_IME" : @"Mở Cài đặt rồi nhấn giữ dòng “%@”.\n\nTrong iMe, dòng “%@” sẽ không dùng được — iMe tự mở menu riêng của nó trên dòng đó.",
       @"WELCOME_HOWTO_TURRIT" : @"Mở Cài đặt rồi nhấn giữ dòng “About Turrit”.",
@@ -1564,7 +1564,7 @@ static inline NSDictionary *GetAllTranslations(NSString *code) {
   }
   if ([code isEqualToString:@"tw"]) {
     return @{
-      @"WELCOME_BODY" : @"Mx 已安裝。\n\n開啟 Mx 選單:\n%@",
+      @"WELCOME_BODY" : @"Kira 已安裝。\n\n開啟 Kira 選單:\n%@",
       @"WELCOME_HOWTO" : @"開啟設定，長按「%@」該列。",
       @"WELCOME_HOWTO_IME" : @"開啟設定，長按「%@」該列。\n\n在 iMe 中「%@」該列無效 —— iMe 會在該列開啟自己的選單。",
       @"WELCOME_HOWTO_TURRIT" : @"開啟設定，長按「About Turrit」該列。",

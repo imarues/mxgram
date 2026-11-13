@@ -157,7 +157,7 @@
 "VIDEO_TO_VOICE_NO_AUDIO" = "这个视频没有声音 —— 改为发送视频";
 
 /* First-run alert */
-"WELCOME_BODY" = "Mx 已安装。\n\n打开 Mx 菜单:\n%@";
+"WELCOME_BODY" = "Kira 已安装。\n\n打开 Kira 菜单:\n%@";
 "WELCOME_HOWTO" = "打开设置，长按“%@”一行。";
 "WELCOME_HOWTO_IME" = "打开设置，长按“%@”一行。\n\n在 iMe 中“%@”一行无效 —— iMe 会在该行打开自己的菜单。";
 "WELCOME_HOWTO_TURRIT" = "打开设置，长按“About Turrit”一行。";

@@ -1,11 +1,11 @@
-name: Mx Dylib Fallback Build (macOS Latest)
+name: Kira Dylib Fallback Build (macOS Latest)
 
 on:
   push:
     branches: [main]
     paths:
       - 'Sources/**'
-      - 'Mx.bundle/**'
+      - 'Kira.bundle/**'
       - 'Makefile'
       - '.github/workflows/ci-dylib-fallback.yml'
   workflow_dispatch:
@@ -16,7 +16,7 @@ permissions:
 # Separate queue from the primary macOS 15 build. The first available
 # macOS image can compile the exact same source, independently.
 concurrency:
-  group: mx-fallback-${{ github.ref }}
+  group: kira-fallback-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -49,15 +49,15 @@ jobs:
       - name: Verify compiled dylib
         shell: bash
         run: |
-          test -s packages/Mx.dylib
-          file packages/Mx.dylib
-          ls -lh packages/Mx.dylib
+          test -s packages/Kira.dylib
+          file packages/Kira.dylib
+          ls -lh packages/Kira.dylib
 
       - name: Upload compiled dylib
         uses: actions/upload-artifact@v4
         with:
-          name: Mx-iKiraPlus-fallback-dylib
-          path: packages/Mx.dylib
+          name: Kira-iKiraPlus-fallback-dylib
+          path: packages/Kira.dylib
           if-no-files-found: error
 
       - name: Publish compiled dylib to latest release
@@ -71,9 +71,9 @@ jobs:
             echo "Newer commit exists; artifact uploaded, skipping outdated release."
             exit 0
           fi
-          if ! gh release view mx-ikiraplus-latest >/dev/null 2>&1; then
-            gh release create mx-ikiraplus-latest \
-              --title "Mx iKiraPlus Latest" \
+          if ! gh release view kira-ikiraplus-latest >/dev/null 2>&1; then
+            gh release create kira-ikiraplus-latest \
+              --title "Kira iKiraPlus Latest" \
               --notes "Compiled latest iOS tweak with voice/video-note and settings fixes."
           fi
-          gh release upload mx-ikiraplus-latest packages/Mx.dylib --clobber
+          gh release upload kira-ikiraplus-latest packages/Kira.dylib --clobber

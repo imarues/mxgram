@@ -20,7 +20,7 @@
 + (NSString *)localizedStringForKey:(NSString *)key;
 @end
 
-// Returns the path to Mx.bundle regardless of installation method.
+// Returns the path to Kira.bundle regardless of installation method.
 // Works on jailbreak, SwiftGram, AltStore, and any sideloaded IPA.
 // Both MxLocalization and LanguageSelector must use this function.
 NSString *MxBundlePath(void);

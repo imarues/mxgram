@@ -1,8 +1,9 @@
-Package: com.m1ronx.mx
-Name: Mx
+Package: com.ikiraplus.kira
+Name: Kira
 Version: 1.0.0
 Architecture: iphoneos-arm
-Description: The best Tweak For Telegram iOS
-Maintainer: m1ronx
-Author: m1ronx
+Description: Kira utility tweak for Telegram iOS
+Maintainer: iKiraPlus
+Author: iKiraPlus
+Original-Author: m1ronx
 Section: Tweaks

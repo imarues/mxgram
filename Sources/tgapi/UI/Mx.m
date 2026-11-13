@@ -1,7 +1,6 @@
 #import "Headers.h"
 #import "../GhostExceptions.h"
 #import "../Headers.h"
-#import "../MxPurge.h"
 #import "../Logger/Logger.h"
 #import "Icons.h"
 #import <Foundation/Foundation.h>
@@ -54,7 +53,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   [self setupIconAsHeader];
   [self setupFooterView];
   [self setupApplyButton];
-  self.title = @"Mx";
+  self.title = @"Kira";
 
   [self fetchAnnouncement];
 
@@ -84,7 +83,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   // Read from the same constant the announcement check uses. These were two
   // separate literals and the footer had been left behind at 1.3.9.
   versionLabel.text =
-      [NSString stringWithFormat:@"Mx Version %@\n© 2026 Mx Team",
+      [NSString stringWithFormat:@"Kira Version %@\n© 2026 Kira Team",
                                  kMxTweakVersion];
 
   [footerView addSubview:versionLabel];
@@ -574,7 +573,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
     // section never renders as a bare header.
     return MAX((NSInteger)[MxGhostExceptions all].count, 1);
   case MISC:
-    return 13;
+    return 12;
   case FILE_FIXER:
     return 2;
   case FAKE_LOCATION:
@@ -916,16 +915,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       cell.imageView.tintColor = [self dynamicColorBW];
       cell.textLabel.text = TGLoc(@"VIDEO_TO_VOICE_TITLE");
       cell.detailTextLabel.text = TGLoc(@"VIDEO_TO_VOICE_SUBTITLE");
-    } else if (indexPath.row == 12) {
-      // Native selection-only, group chats. Requires a compatible VoidGram
-      // build with mxCanSelectMyGroupMessages/mxBeginMyGroupSelection.
-      cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
-      cell.imageView.tintColor = [UIColor systemRedColor];
-      BOOL ar = [TGLoc(@"CANCEL") isEqualToString:@"إلغاء"];
-      cell.textLabel.text = ar ? @"تحديد رسائلي بالمجموعات" : @"Select My Group Messages";
-      cell.detailTextLabel.text = ar
-          ? @"تحديد حتى 100 رسالة من رسائلك بالكروب المفتوح، والحذف يتم فقط بزر تيليجرام الرسمي. يتطلب VoidGram متوافق."
-          : @"Select up to 100 of your messages in the current group. Delete manually using Telegram's own button. Requires compatible VoidGram.";
+
     }
 
     UISwitch *toggle = (UISwitch *)cell.accessoryView;
@@ -1029,7 +1019,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   } else if (indexPath.section == CREDITS) {
     cell = [self normalCellFromTableView:tableView];
     if (indexPath.row == 0) {
-      cell.textLabel.text = @"Mx Team / m1ronx";
+      cell.textLabel.text = @"Kira / iKiraPlus";
       cell.detailTextLabel.text = @"Developer";
       cell.detailTextLabel.textColor = [UIColor lightGrayColor];
       NSData *imageData = [[NSData alloc] initWithBase64EncodedString:MXLOGOPNG options:NSDataBase64DecodingIgnoreUnknownCharacters];
@@ -1218,7 +1208,7 @@ static NSString *const kMxTweakVersion = @"1.0.0";
   NSURL *url = [NSURL URLWithString:urlString];
   if (!url) return;
 
-  // The Mx menu is modal — it has to go away before the profile can show
+  // The Kira menu is modal — it has to go away before the profile can show
   // underneath it.
   [self dismissViewControllerAnimated:YES
                            completion:^{
@@ -1379,9 +1369,6 @@ static NSString *const kMxTweakVersion = @"1.0.0";
     
     [[NSUserDefaults standardUserDefaults] setBool:sender.isOn
                                             forKey:switchKey];
-    if ([switchKey isEqualToString:kDeleteMyMessages]) {
-      MxPurgeSettingsChanged();
-    }
     // Names the key each row actually writes — the quickest way to catch a
     // section/row mapping that has drifted out of step with the labels.
     mxDiag("switch section=%ld row=%ld key=%{public}@ value=%d",
@@ -1448,8 +1435,6 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       return kHideDisappearingLabel;
     case 10:
       return kVideoToVoice;
-    case 12:
-      return kDeleteMyMessages;
     default:
       // Row 9 is Download Speed Boost, a multi-choice row rather than a switch.
       return nil;

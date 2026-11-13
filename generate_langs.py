@@ -3,13 +3,13 @@ import argparse
 
 # Mọi path suy ra từ vị trí script -> chạy được trên máy bất kỳ, không phụ thuộc CWD
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_BUNDLE = os.path.join(SCRIPT_DIR, "Mx.bundle")
+DEFAULT_BUNDLE = os.path.join(SCRIPT_DIR, "Kira.bundle")
 DEFAULT_OUTPUT = os.path.join(SCRIPT_DIR, "Sources", "tgapi", "UI", "EmbeddedLangs.h")
 
 parser = argparse.ArgumentParser(
-    description="Sinh EmbeddedLangs.h từ các Localizable.strings trong Mx.bundle"
+    description="Sinh EmbeddedLangs.h từ các Localizable.strings trong Kira.bundle"
 )
-parser.add_argument("--bundle", default=DEFAULT_BUNDLE, help=f"Đường dẫn Mx.bundle (mặc định: {DEFAULT_BUNDLE})")
+parser.add_argument("--bundle", default=DEFAULT_BUNDLE, help=f"Đường dẫn Kira.bundle (mặc định: {DEFAULT_BUNDLE})")
 parser.add_argument("--output", default=DEFAULT_OUTPUT, help=f"File header xuất ra (mặc định: {DEFAULT_OUTPUT})")
 args = parser.parse_args()
 

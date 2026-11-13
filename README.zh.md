@@ -2,7 +2,7 @@
   <img src="icon.png" width="160">
 </p>
 
-<h1 align="center">Mx</h1>
+<h1 align="center">Kira</h1>
 
 <p align="center">
   一款原生质感的 iOS Telegram 隐私与实用工具插件。
@@ -27,7 +27,7 @@
 
 安装 `.deb`（已越狱设备）或侧载已打补丁的 IPA，然后打开 Telegram。
 
-> **打开 Mx 菜单：** 在 Telegram 设置中**长按 "Ask a Question"（提问）那一行**。
+> **打开 Kira 菜单：** 在 Telegram 设置中**长按 "Ask a Question"（提问）那一行**。
 
 ## 功能
 
@@ -100,12 +100,12 @@
 需要 [Theos](https://theos.dev) 以及 iOS 16.5 SDK。
 
 ```bash
-make package          # 编译 Mx.dylib 与 .deb
+make package          # 编译 Kira.dylib 与 .deb
 ```
 
-`.dylib` 同时会复制到 `packages/Mx.dylib`，方便直接侧载。
+`.dylib` 同时会复制到 `packages/Kira.dylib`，方便直接侧载。
 
-修改任意 `Mx.bundle/*.lproj/Localizable.strings` 后，重新生成内嵌翻译：
+修改任意 `Kira.bundle/*.lproj/Localizable.strings` 后，重新生成内嵌翻译：
 
 ```bash
 python3 generate_langs.py
@@ -131,5 +131,5 @@ python3 generate_langs.py
 ---
 
 <p align="center">
-  📢 Telegram 频道：<a href="https://t.me/m1ronx">t.me/m1ronx</a>
+  📢 Telegram 频道：<a href="https://t.me/iKiraPlus">t.me/iKiraPlus</a>
 </p>

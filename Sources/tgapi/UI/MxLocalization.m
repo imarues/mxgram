@@ -5,7 +5,7 @@
 
 // ============================================================
 // MxBundlePath() — shared function used by MxLocalization
-// and LanguageSelector to find Mx.bundle.
+// and LanguageSelector to find Kira.bundle.
 //
 // Search order:
 //  1. Next to the dylib via dladdr (covers Frameworks/ layout)
@@ -29,12 +29,12 @@ NSString *MxBundlePath(void) {
       NSString *dylibDir = [dylibPath stringByDeletingLastPathComponent];
 
       NSArray *candidates = @[
-        [dylibDir stringByAppendingPathComponent:@"Mx.bundle"],
+        [dylibDir stringByAppendingPathComponent:@"Kira.bundle"],
         [[dylibDir stringByDeletingLastPathComponent]
-            stringByAppendingPathComponent:@"Mx.bundle"],
+            stringByAppendingPathComponent:@"Kira.bundle"],
         [[[dylibDir stringByDeletingLastPathComponent]
             stringByDeletingLastPathComponent]
-            stringByAppendingPathComponent:@"Mx.bundle"]
+            stringByAppendingPathComponent:@"Kira.bundle"]
       ];
 
       for (NSString *c in candidates) {
@@ -47,8 +47,8 @@ NSString *MxBundlePath(void) {
 
     // 2. Classic jailbreak path
     NSString *jbPath = [NSString
-        stringWithFormat:@"%@/Mx.bundle",
-                         jbroot(@"/Library/Application Support/Mx")];
+        stringWithFormat:@"%@/Kira.bundle",
+                         jbroot(@"/Library/Application Support/Kira")];
     if ([fm fileExistsAtPath:jbPath]) {
       cachedPath = jbPath;
       return;
@@ -56,7 +56,7 @@ NSString *MxBundlePath(void) {
 
     // 3. Final desperate scan in the main bundle's subdirectories
     NSString *bundlePath = [NSBundle mainBundle].bundlePath;
-    NSArray *subDirs = @[ @"Mx.bundle", @"Frameworks/Mx.bundle" ];
+    NSArray *subDirs = @[ @"Kira.bundle", @"Frameworks/Kira.bundle" ];
     for (NSString *sub in subDirs) {
       NSString *path = [bundlePath stringByAppendingPathComponent:sub];
       if ([fm fileExistsAtPath:path]) {
@@ -374,7 +374,7 @@ static NSString *MxLanguageMatchingDevice(void) {
           @"one-time media.",
       /* First-run alert. WELCOME_HOWTO_IME takes two substitutions, gift row
          first and support row second; the others take one or none. */
-      @"WELCOME_BODY" : @"Mx is installed.\n\nTo open the Mx menu:\n%@",
+      @"WELCOME_BODY" : @"Kira is installed.\n\nTo open the Kira menu:\n%@",
       @"WELCOME_HOWTO" : @"Open Settings and long-press the \"%@\" row.",
       @"WELCOME_HOWTO_IME" :
           @"Open Settings and long-press the \"%@\" row.\n\nIn iMe the \"%@\" "

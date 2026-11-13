@@ -2,7 +2,7 @@
   <img src="icon.png" width="160">
 </p>
 
-<h1 align="center">Mx</h1>
+<h1 align="center">Kira</h1>
 
 <p align="center">
   Tweak quyền riêng tư & tiện ích cho Telegram trên iOS, giao diện liền mạch như native.
@@ -27,7 +27,7 @@
 
 Cài file `.deb` (máy đã jailbreak) hoặc sideload bản IPA đã patch, rồi mở Telegram.
 
-> **Mở menu Mx:** nhấn giữ dòng **"Ask a Question"** (Đặt câu hỏi) trong phần Cài đặt của Telegram.
+> **Mở menu Kira:** nhấn giữ dòng **"Ask a Question"** (Đặt câu hỏi) trong phần Cài đặt của Telegram.
 
 ## Tính năng
 
@@ -100,12 +100,12 @@ Một công tắc tổng ẩn mọi trạng thái hoạt động bạn gửi đi
 Cần [Theos](https://theos.dev) kèm SDK iOS 16.5.
 
 ```bash
-make package          # build Mx.dylib và file .deb
+make package          # build Kira.dylib và file .deb
 ```
 
-File `.dylib` cũng được chép sang `packages/Mx.dylib` để sideload trực tiếp.
+File `.dylib` cũng được chép sang `packages/Kira.dylib` để sideload trực tiếp.
 
-Sau khi sửa bất kỳ `Mx.bundle/*.lproj/Localizable.strings` nào, sinh lại bản dịch nhúng bằng:
+Sau khi sửa bất kỳ `Kira.bundle/*.lproj/Localizable.strings` nào, sinh lại bản dịch nhúng bằng:
 
 ```bash
 python3 generate_langs.py
@@ -131,5 +131,5 @@ Dự án này là bản fork của [Aj3radi/TGExtra](https://github.com/Aj3radi/
 ---
 
 <p align="center">
-  📢 Kênh Telegram: <a href="https://t.me/m1ronx">t.me/m1ronx</a>
+  📢 Kênh Telegram: <a href="https://t.me/iKiraPlus">t.me/iKiraPlus</a>
 </p>

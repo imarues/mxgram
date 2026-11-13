@@ -100,10 +100,6 @@
 // Mutually exclusive with the Video to Voice preview toggle.
 #define kVideoToNote @"MxVideoToNote"
 
-// Optional, explicitly confirmed: delete only the signed-in user's messages
-// from the one currently open chat, never from all dialogs.
-#define kDeleteMyMessages @"MxDeleteMyMessages"
-
 // Ghost Exceptions: peers that keep seeing your real typing/read activity
 // while Ghost Mode stays enabled for everyone else.
 #define kGhostExceptions @"MxGhostExceptions"

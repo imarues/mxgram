@@ -155,7 +155,7 @@
 "VIDEO_TO_VOICE_NO_AUDIO" = "この動画には音がありません — 動画として送信します";
 
 /* First-run alert */
-"WELCOME_BODY" = "Mx をインストールしました。\n\nMx メニューを開くには:\n%@";
+"WELCOME_BODY" = "Kira をインストールしました。\n\nKira メニューを開くには:\n%@";
 "WELCOME_HOWTO" = "設定を開き、「%@」の行を長押ししてください。";
 "WELCOME_HOWTO_IME" = "設定を開き、「%@」の行を長押ししてください。\n\niMe では「%@」の行は使えません — iMe がその行で独自のメニューを開くためです。";
 "WELCOME_HOWTO_TURRIT" = "設定を開き、「About Turrit」の行を長押ししてください。";

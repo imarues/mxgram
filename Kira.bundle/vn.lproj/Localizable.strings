@@ -155,7 +155,7 @@
 "VIDEO_TO_VOICE_NO_AUDIO" = "Video này không có tiếng — gửi video thay thế";
 
 /* First-run alert */
-"WELCOME_BODY" = "Đã cài Mx.\n\nĐể mở menu Mx:\n%@";
+"WELCOME_BODY" = "Đã cài Kira.\n\nĐể mở menu Kira:\n%@";
 "WELCOME_HOWTO" = "Mở Cài đặt rồi nhấn giữ dòng “%@”.";
 "WELCOME_HOWTO_IME" = "Mở Cài đặt rồi nhấn giữ dòng “%@”.\n\nTrong iMe, dòng “%@” sẽ không dùng được — iMe tự mở menu riêng của nó trên dòng đó.";
 "WELCOME_HOWTO_TURRIT" = "Mở Cài đặt rồi nhấn giữ dòng “About Turrit”.";

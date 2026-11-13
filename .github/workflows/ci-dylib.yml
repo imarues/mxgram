@@ -1,4 +1,4 @@
-name: Build Mx Dylib (Source Check)
+name: Build Kira Dylib (Source Check)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - 'Sources/**'
-      - 'Mx.bundle/**'
+      - 'Kira.bundle/**'
       - 'Makefile'
       - '.github/workflows/ci-dylib.yml'
 
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: mx-dylib-${{ github.ref }}
+  group: kira-dylib-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,25 +31,25 @@ jobs:
           sdks-src: 'waruhachi/sdks'
           sdks-branch: 'main'
 
-      - name: Compile Mx for sideload injection
+      - name: Compile Kira for sideload injection
         shell: bash
         run: make clean package FINALPACKAGE=1 STRIP=0
 
-      - name: Upload Mx.dylib
+      - name: Upload Kira.dylib
         uses: actions/upload-artifact@v4
         with:
-          name: Mx-iKiraPlus-dylib
-          path: packages/Mx.dylib
+          name: Kira-iKiraPlus-dylib
+          path: packages/Kira.dylib
           if-no-files-found: error
 
       - name: Upload tweak packages
         uses: actions/upload-artifact@v4
         with:
-          name: Mx-iKiraPlus-deb
+          name: Kira-iKiraPlus-deb
           path: packages/*.deb
           if-no-files-found: error
 
-      - name: Publish downloadable Mx.dylib release
+      - name: Publish downloadable Kira.dylib release
         if: github.ref == 'refs/heads/main'
         shell: bash
         env:
@@ -61,9 +61,9 @@ jobs:
             echo "A newer main commit exists; skipping stale release."
             exit 0
           fi
-          if ! gh release view mx-ikiraplus-latest >/dev/null 2>&1; then
-            gh release create mx-ikiraplus-latest \
-              --title "Mx iKiraPlus Latest" \
+          if ! gh release view kira-ikiraplus-latest >/dev/null 2>&1; then
+            gh release create kira-ikiraplus-latest \
+              --title "Kira iKiraPlus Latest" \
               --notes "Compiled iOS dylib. Includes video-to-voice and circular Video Notes (640x640), file picker fix, and custom badge."
           fi
-          gh release upload mx-ikiraplus-latest packages/Mx.dylib --clobber
+          gh release upload kira-ikiraplus-latest packages/Kira.dylib --clobber

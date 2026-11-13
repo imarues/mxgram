@@ -54,7 +54,7 @@ static NSString *logFilePath() {
 
         if (appGroup) {
             NSString *bundleIdentifier = [NSBundle mainBundle].bundleIdentifier;
-            NSString *mxLogDir = [appGroup[@"path"] stringByAppendingPathComponent:@"group.mx.logs"];
+            NSString *mxLogDir = [appGroup[@"path"] stringByAppendingPathComponent:@"group.kira.logs"];
             NSString *logFileName = [NSString stringWithFormat:@"%@.txt", bundleIdentifier];
             path = [mxLogDir stringByAppendingPathComponent:logFileName];
 
@@ -76,7 +76,7 @@ static NSString *logFilePath() {
             }
         } else {
             // Fallback to the Documents directory
-            path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/MxLogs.txt"];
+            path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/KiraLogs.txt"];
 
             // Ensure the file exists
             if (![fileManager fileExistsAtPath:path]) {
@@ -92,7 +92,7 @@ static NSString *logFilePath() {
 void customLog(NSString *format, ...) {
 	static dispatch_once_t token;
 	dispatch_once(&token, ^{
-		logQueue = dispatch_queue_create("com.mx.logs", DISPATCH_QUEUE_SERIAL);
+		logQueue = dispatch_queue_create("com.kira.logs", DISPATCH_QUEUE_SERIAL);
 	});
 	
 	va_list args;
@@ -136,7 +136,7 @@ void customLog2(NSString *format, ...) {
     NSData *logData = [logMessage dataUsingEncoding:NSUTF8StringEncoding];
 
     // Always write to Documents — works on non-jb sideload without app group
-    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/mx_debug.txt"];
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/kira_debug.txt"];
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm fileExistsAtPath:path]) {
         [fm createFileAtPath:path contents:nil attributes:nil];
