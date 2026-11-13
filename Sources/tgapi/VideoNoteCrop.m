@@ -3,6 +3,7 @@
 #import "VideoNoteCrop.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Photos/Photos.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
 #import <math.h>
 #import "UI/Headers.h"
