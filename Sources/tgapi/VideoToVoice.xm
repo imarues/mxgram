@@ -25,6 +25,7 @@
 #import "Headers.h"
 #import "Logger/Logger.h"
 #import "UI/Headers.h"
+#import "VideoNoteCrop.h"
 
 // Minimal redeclarations of LegacyComponents types. Everything is probed with
 // -respondsToSelector: before use, so a host app that renamed or dropped a
@@ -420,11 +421,59 @@ static NSURL *mxNewNoteOutputURL(NSString *baseName) {
     return [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]];
 }
 
+// Session-only crop state, locked because export can run off the UI queue.
+static CGPoint mxNoteCropCenter = {0.5, 0.5};
+static NSString *mxNoteSelectedAsset = nil;
+static NSObject *mxNoteCropLock(void) {
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ lock = [NSObject new]; });
+    return lock;
+}
+static id mxNoteReadProperty(id object, NSString *property) {
+    if (!object) return nil;
+    SEL getter = NSSelectorFromString(property);
+    if (![object respondsToSelector:getter]) return nil;
+    @try { return ((id (*)(id, SEL))objc_msgSend)(object, getter); }
+    @catch (__unused NSException *exception) { return nil; }
+}
+// Resolve a stable Photos identifier through TGMediaPickerGalleryItem wrappers.
+static NSString *mxNoteItemKey(id item) {
+    id node = item;
+    for (NSInteger i = 0; node && i < 7; ++i) {
+        if ([node isKindOfClass:[PHAsset class]]) return [node localIdentifier];
+        if ([node isKindOfClass:[NSURL class]]) return [node absoluteString];
+        id backing = mxNoteReadProperty(node, @"backingAsset");
+        if ([backing isKindOfClass:[PHAsset class]]) return [backing localIdentifier];
+        id url = mxNoteReadProperty(node, @"url");
+        if ([url isKindOfClass:[NSURL class]]) return [url absoluteString];
+        if ([url isKindOfClass:[NSString class]] && [url length]) return url;
+        id next = mxNoteReadProperty(node, @"backingItem");
+        if (!next || next == node) next = mxNoteReadProperty(node, @"asset");
+        if (!next || next == node) next = mxNoteReadProperty(node, @"mediaItem");
+        if (next == node) break;
+        node = next;
+    }
+    return nil;
+}
+static void mxStoreNoteCrop(CGPoint crop, NSString *assetKey) {
+    @synchronized (mxNoteCropLock()) {
+        mxNoteCropCenter = crop;
+        mxNoteSelectedAsset = [assetKey copy];
+    }
+}
+static NSDictionary *mxNoteCropSnapshot(void) {
+    @synchronized (mxNoteCropLock()) {
+        return @{@"x": @(mxNoteCropCenter.x), @"y": @(mxNoteCropCenter.y),
+                 @"asset": mxNoteSelectedAsset ?: @""};
+    }
+}
+
 // iOS does not have a single AVAssetExportSession preset for cropped video
 // notes. A video composition applies the natural rotation, centers the crop,
 // and renders the actual pixels at 640 x 640 before upload.
 static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
-                                 NSString *baseName) {
+                                 NSString *baseName, CGPoint cropCenter) {
     AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
     if (!track) {
         MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
@@ -453,8 +502,15 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
     }
     static const CGFloat side = 640.0;
     CGFloat scale = MAX(side / width, side / height);
-    CGFloat cropX = (width * scale - side) / 2.0;
-    CGFloat cropY = (height * scale - side) / 2.0;
+    // Match the crop picker: center is normalized in the oriented video.
+    CGFloat scaledWidth = width * scale;
+    CGFloat scaledHeight = height * scale;
+    CGFloat centerX = isfinite(cropCenter.x) ? cropCenter.x : 0.5;
+    CGFloat centerY = isfinite(cropCenter.y) ? cropCenter.y : 0.5;
+    CGFloat cropX = fmax(0, fmin(scaledWidth - side,
+                                 centerX * scaledWidth - side / 2.0));
+    CGFloat cropY = fmax(0, fmin(scaledHeight - side,
+                                 centerY * scaledHeight - side / 2.0));
 
     // The preferred transform handles all four device orientations. Normalize
     // its transformed bounding box to (0,0), then scale and center-crop.
@@ -522,13 +578,20 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
     return output;
 }
 
-static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext) {
+static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext,
+                                             CGPoint cropCenter, NSString *chosenAsset) {
     if (![anyDict isKindOfClass:[NSDictionary class]]) return nil;
     NSDictionary *dict = anyDict;
     NSString *type = dict[@"type"];
     if (![type isKindOfClass:[NSString class]] ||
         !([type isEqualToString:@"video"] || [type isEqualToString:@"cameraVideo"])) {
         return nil;
+    }
+    if (chosenAsset.length) {
+        NSString *candidate = mxNoteItemKey(dict[@"asset"] ?: dict[@"url"]);
+        if (candidate.length && ![candidate isEqualToString:chosenAsset]) {
+            return nil; // Different gallery item: do not crop another video.
+        }
     }
     AVAsset *asset = mxResolveAVAsset(dict);
     if (!asset) return nil;
@@ -538,7 +601,7 @@ static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext) {
     if ([item respondsToSelector:@selector(fileName)]) baseName = [item fileName];
     if (!baseName.length) baseName = dict[@"fileName"];
 
-    NSURL *output = mxExportRoundVideo(asset, range, baseName);
+    NSURL *output = mxExportRoundVideo(asset, range, baseName, cropCenter);
     if (!output) return nil; // On failure Telegram sends the original video.
 
     NSMutableDictionary *rewritten = [dict mutableCopy];
@@ -573,6 +636,7 @@ static const CGFloat kMxVoiceButtonSide = 40.0;
 
 static const void *kMxItemIsVideoKey = &kMxItemIsVideoKey;
 static const void *kMxGalleryModeInitializedKey = &kMxGalleryModeInitializedKey;
+static const void *kMxFocusedVideoItemKey = &kMxFocusedVideoItemKey;
 
 /// True for a picked video. Fetch-result items wrap the real one, so the
 /// backing item is checked too.
@@ -631,6 +695,7 @@ static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
     BOOL enabled = ![defaults boolForKey:kVideoToVoice];
     [defaults setBool:enabled forKey:kVideoToVoice];
     [defaults setBool:NO forKey:kVideoToNote];
+    mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
     mxStyleVoiceButton(sender, enabled);
     mxStyleNoteButton((UIButton *)[sender.superview viewWithTag:kMxNoteButtonTag], NO);
     mxDiag("v2v: preview toggle -> %d", enabled);
@@ -643,19 +708,40 @@ static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
     [haptic impactOccurred];
 }
 
-// Second button immediately under the existing waveform button.
+// The crop must be approved before note mode is enabled. Telegram's existing
+// send button remains the only thing that actually sends the video.
 - (void)handleNoteTap:(UIButton *)sender {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    BOOL enabled = ![defaults boolForKey:kVideoToNote];
-    [defaults setBool:enabled forKey:kVideoToNote];
-    [defaults setBool:NO forKey:kVideoToVoice];
-    mxStyleNoteButton(sender, enabled);
-    mxStyleVoiceButton((UIButton *)[sender.superview viewWithTag:kMxVoiceButtonTag], NO);
-    MxShowToast([MxLocalization localizedStringForKey:
-        enabled ? @"VIDEO_TO_NOTE_ON_TOAST" : @"VIDEO_TO_NOTE_OFF_TOAST"]);
-    UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc]
-        initWithStyle:UIImpactFeedbackStyleMedium];
-    [haptic impactOccurred];
+    UIView *gallery = sender.superview;
+    id item = objc_getAssociatedObject(gallery, kMxFocusedVideoItemKey);
+    if (!item) return;
+    BOOL selected = mxVideoToNoteEnabled();
+    NSDictionary *oldCrop = mxNoteCropSnapshot();
+    CGPoint initial = selected
+        ? CGPointMake([oldCrop[@"x"] doubleValue], [oldCrop[@"y"] doubleValue])
+        : CGPointMake(0.5, 0.5);
+    NSString *assetKey = mxNoteItemKey(item);
+    __weak UIView *weakGallery = gallery;
+
+    MxPresentVideoNoteCrop(gallery, item, initial, selected, ^(CGPoint crop) {
+        mxStoreNoteCrop(crop, assetKey);
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setBool:YES forKey:kVideoToNote];
+        [defaults setBool:NO forKey:kVideoToVoice];
+        UIView *view = weakGallery;
+        mxStyleNoteButton((UIButton *)[view viewWithTag:kMxNoteButtonTag], YES);
+        mxStyleVoiceButton((UIButton *)[view viewWithTag:kMxVoiceButtonTag], NO);
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_ON_TOAST"]);
+        UIImpactFeedbackGenerator *feedback = [[UIImpactFeedbackGenerator alloc]
+            initWithStyle:UIImpactFeedbackStyleMedium];
+        [feedback impactOccurred];
+    }, ^{
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setBool:NO forKey:kVideoToNote];
+        mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
+        UIView *view = weakGallery;
+        mxStyleNoteButton((UIButton *)[view viewWithTag:kMxNoteButtonTag], NO);
+        MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_OFF_TOAST"]);
+    });
 }
 
 @end
@@ -809,7 +895,20 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
         objc_setAssociatedObject(self, kMxGalleryModeInitializedKey, @YES,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    objc_setAssociatedObject(self, kMxItemIsVideoKey, @(mxItemIsVideo(item)),
+    id previous = objc_getAssociatedObject(self, kMxFocusedVideoItemKey);
+    NSString *previousKey = mxNoteItemKey(previous);
+    NSString *newKey = mxNoteItemKey(item);
+    if (previous && previous != item &&
+        (!previousKey.length || ![previousKey isEqualToString:newKey])) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        [defaults setBool:NO forKey:kVideoToVoice];
+        [defaults setBool:NO forKey:kVideoToNote];
+        mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
+    }
+    BOOL isVideo = mxItemIsVideo(item);
+    objc_setAssociatedObject(self, kMxFocusedVideoItemKey, isVideo ? item : nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, kMxItemIsVideoKey, @(isVideo),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     mxUpdateVoiceButton(self);
 }
@@ -855,15 +954,21 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
                                 convertToJpeg:(bool)convertToJpeg
                          descriptionGenerator:(MxDescriptionGenerator)descriptionGenerator
                              saveEditedPhotos:(bool)saveEditedPhotos {
-    if ((!mxVideoToVoiceEnabled() && !mxVideoToNoteEnabled()) ||
-        !descriptionGenerator) return %orig;
+    BOOL noteMode = mxVideoToNoteEnabled();
+    BOOL voiceMode = mxVideoToVoiceEnabled();
+    if ((!voiceMode && !noteMode) || !descriptionGenerator) return %orig;
+    // Freeze mode and crop for this send; the gallery may close while exporting.
+    NSDictionary *noteSelection = noteMode ? mxNoteCropSnapshot() : nil;
+    CGPoint crop = CGPointMake([noteSelection[@"x"] doubleValue],
+                               [noteSelection[@"y"] doubleValue]);
+    NSString *chosenAsset = noteSelection[@"asset"];
 
     MxDescriptionGenerator wrapped =
         ^id(id dict, NSAttributedString *caption, NSString *hash, NSString *uniqueId) {
             NSDictionary *rewritten = nil;
             @try {
-                rewritten = mxVideoToNoteEnabled()
-                    ? mxRewriteToRoundVideo(dict, editingContext)
+                rewritten = noteMode
+                    ? mxRewriteToRoundVideo(dict, editingContext, crop, chosenAsset)
                     : mxRewriteToVoice(dict, editingContext);
             } @catch (NSException *e) {
                 mxDiag("v2v: rewrite threw — %{public}s", e.reason.UTF8String ?: "?");
