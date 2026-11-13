@@ -1408,6 +1408,10 @@ static Class mxChatControllerClass(void) {
 // %init below resolves Impl first and keeps the old name as a fallback for any
 // client still shipping it.
 %hook _TtC10TelegramUI18ChatControllerImpl
+- (void)viewDidLayoutSubviews {
+    %orig;
+    MxPurgeChatLayout((UIViewController *)self);
+}
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     MxPurgeChatAppeared((UIViewController *)self);

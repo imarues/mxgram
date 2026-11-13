@@ -38,7 +38,7 @@ static const void *kMxPurgeContextKey = &kMxPurgeContextKey;
 @property (nonatomic, strong) NSData *peerData;
 @property (nonatomic, strong) NSNumber *accountId;
 @property (nonatomic, strong) UIButton *button;
-@property (nonatomic, strong) UIBarButtonItem *barItem;
+@property (nonatomic, strong) UIBarButtonItem *barItem; // legacy; custom Telegram nav ignores it
 @property (nonatomic, assign) BOOL busy;
 @property (nonatomic, assign) BOOL cancelled;
 @property (nonatomic, assign) BOOL partial;
@@ -71,6 +71,7 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
 + (instancetype)shared;
 - (void)capture:(MTRequest *)request service:(MTRequestMessageService *)service;
 - (void)appeared:(UIViewController *)controller;
+- (void)layout:(UIViewController *)controller;
 - (void)disappeared:(UIViewController *)controller;
 - (void)settingsChanged;
 - (void)tapped:(UIButton *)button;
@@ -116,6 +117,28 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         }
     });
 }
+// Telegram/VoidGram draw their own navigation header and ignore UIKit
+// UINavigationItem.rightBarButtonItems. Attach an always-visible floating
+// control to the chat's REAL view, above its ASDisplayNode subtree.
+//
+// A gray button is only a diagnostic/unverified state: no delete is permitted
+// until the visible chat, the MTProto service, and the account all match.
+- (void)positionButton:(MxPurgeContext *)ctx {
+    UIViewController *vc = ctx.controller;
+    UIView *host = vc.view;
+    if (!host || !ctx.button || !host.window) return;
+    CGFloat width = CGRectGetWidth(host.bounds);
+    CGFloat height = CGRectGetHeight(host.bounds);
+    if (width < 100 || height < 200) return;
+    CGFloat safeTop = host.safeAreaInsets.top;
+    // Below the custom navigation + pinned-message bar. Does not steal touches
+    // from the back button, avatar, title, or the message composer.
+    CGFloat y = MIN(MAX(safeTop + 132.0, 124.0), height - host.safeAreaInsets.bottom - 72.0);
+    CGFloat x = width - host.safeAreaInsets.right - 54.0;
+    ctx.button.frame = CGRectMake(MAX(8.0, x), y, 44.0, 44.0);
+    if (ctx.button.superview != host) [host addSubview:ctx.button];
+    [host bringSubviewToFront:ctx.button];
+}
 - (void)settingsChanged {
     if (![self enabled]) {
         @synchronized (self) { [self.peers removeAllObjects]; }
@@ -123,58 +146,68 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         MxPurgeContext *ctx = vc ? objc_getAssociatedObject(vc, kMxPurgeContextKey) : nil;
         if (ctx) {
             ctx.cancelled = YES;
-            [ctx.barItem.customView removeFromSuperview];
-            NSMutableArray *items = [vc.navigationItem.rightBarButtonItems mutableCopy];
-            [items removeObject:ctx.barItem];
-            vc.navigationItem.rightBarButtonItems = items;
+            [ctx.button removeFromSuperview];
         }
     }
 }
 - (void)appeared:(UIViewController *)controller {
-    if (!controller || ![self enabled]) return;
+    if (!controller) return;
     self.visibleChat = controller;
+    MxPurgeContext *old = objc_getAssociatedObject(controller, kMxPurgeContextKey);
+    if (![self enabled]) {
+        old.cancelled = YES;
+        [old.button removeFromSuperview];
+        return;
+    }
     NSString *key = [MxPurgeCodec chatKeyForController:controller];
-    // Exact namespace-qualified chat peer is mandatory. In particular,
-    // never offer deletion inside secret chats or unknown thread locations.
-    if (!key.length) return;
     id accountContext = nil;
     @try { accountContext = [(id)controller valueForKey:@"context"]; }
     @catch (__unused NSException *exception) {}
     NSNumber *own = accountContext ? [MxPurgeCodec accountIdForContext:accountContext] : nil;
-    // If the chat doesn't expose its account identity, deletion is disabled.
-    MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
-    if (!ctx || ![ctx.peerKey isEqualToString:key]) {
-        ctx = [MxPurgeContext new];
-        ctx.controller = controller;
-        ctx.peerKey = key;
-        ctx.accountId = own;
+    // A missing key or account leaves a visible gray icon. NEVER replace it
+    // with an inferred peer or pick a peer from another conversation.
+    BOOL sameChat = old && [old.peerKey isEqualToString:key ?: @""];
+    MxPurgeContext *ctx = sameChat ? old : [MxPurgeContext new];
+    if (!sameChat) {
+        old.cancelled = YES;
+        [old.button removeFromSuperview];
         ctx.deletedIds = [NSMutableSet set];
+        ctx.peerKey = key ?: @"";
         objc_setAssociatedObject(controller, kMxPurgeContextKey, ctx, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else {
-        ctx.cancelled = NO;
-        ctx.accountId = own;
     }
+    ctx.controller = controller;
+    ctx.cancelled = NO;
+    ctx.accountId = own;
     if (!ctx.button) {
         UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-        button.frame = CGRectMake(0, 0, 39, 39);
+        button.frame = CGRectMake(0, 0, 44, 44);
         button.accessibilityLabel = mxPurgeText(@"حذف كل رسائلي في هذه المحادثة",
                                                   @"Delete my messages in this chat");
         button.tag = 91017;
+        button.layer.cornerRadius = 22.0;
+        button.layer.borderWidth = 1.0;
+        button.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
+        button.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.86];
         [button addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
         ctx.button = button;
-        ctx.barItem = [[UIBarButtonItem alloc] initWithCustomView:button];
-    }
-    if (![controller.navigationItem.rightBarButtonItems containsObject:ctx.barItem]) {
-        NSMutableArray *items = [controller.navigationItem.rightBarButtonItems mutableCopy] ?: [NSMutableArray array];
-        [items addObject:ctx.barItem];
-        controller.navigationItem.rightBarButtonItems = items;
     }
     [self style:ctx];
-    if (!ctx.scanned) [self lookupContext:ctx];
+    [self positionButton:ctx];
+    if (key.length && own.longLongValue > 0 && !ctx.scanned)
+        [self lookupContext:ctx];
+}
+- (void)layout:(UIViewController *)controller {
+    if (![self enabled] || self.visibleChat != controller) return;
+    MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
+    if (!ctx || ctx.cancelled) return;
+    [self positionButton:ctx];
 }
 - (void)disappeared:(UIViewController *)controller {
     MxPurgeContext *ctx = objc_getAssociatedObject(controller, kMxPurgeContextKey);
-    if (ctx) ctx.cancelled = YES;
+    if (ctx) {
+        ctx.cancelled = YES;
+        [ctx.button removeFromSuperview];
+    }
     if (self.visibleChat == controller) self.visibleChat = nil;
 }
 - (void)style:(MxPurgeContext *)ctx {
@@ -414,6 +447,9 @@ void MxPurgeChatAppeared(UIViewController *controller) {
 }
 void MxPurgeChatDisappeared(UIViewController *controller) {
     [[MxPurgeManager shared] disappeared:controller];
+}
+void MxPurgeChatLayout(UIViewController *controller) {
+    [[MxPurgeManager shared] layout:controller];
 }
 void MxPurgeSettingsChanged(void) {
     [[MxPurgeManager shared] settingsChanged];
