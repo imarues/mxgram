@@ -11,6 +11,7 @@ extern "C" {
 void MxPurgeCaptureRequest(MTRequest *request, MTRequestMessageService *service);
 void MxPurgeChatAppeared(UIViewController *controller);
 void MxPurgeChatDisappeared(UIViewController *controller);
+void MxPurgeChatLayout(UIViewController *controller);
 void MxPurgeSettingsChanged(void);
 #ifdef __cplusplus
 }
