@@ -917,15 +917,15 @@ static NSString *const kMxTweakVersion = @"1.0.0";
       cell.textLabel.text = TGLoc(@"VIDEO_TO_VOICE_TITLE");
       cell.detailTextLabel.text = TGLoc(@"VIDEO_TO_VOICE_SUBTITLE");
     } else if (indexPath.row == 12) {
-      // Extra, opt-in action. The red/orange/green trash appears in the
-      // currently open conversation only when this setting is enabled.
-      cell.imageView.image = [UIImage systemImageNamed:@"trash.fill"];
+      // Native selection-only, group chats. Requires a compatible VoidGram
+      // build with mxCanSelectMyGroupMessages/mxBeginMyGroupSelection.
+      cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
       cell.imageView.tintColor = [UIColor systemRedColor];
       BOOL ar = [TGLoc(@"CANCEL") isEqualToString:@"إلغاء"];
-      cell.textLabel.text = ar ? @"حذف كل رسائلي" : @"Delete My Messages";
+      cell.textLabel.text = ar ? @"تحديد رسائلي بالمجموعات" : @"Select My Group Messages";
       cell.detailTextLabel.text = ar
-          ? @"إظهار سلة في كل محادثة لحذف رسائلك أنت فقط من تلك المحادثة، بعد التأكيد."
-          : @"Show a trash button in each chat to delete only your messages in that chat, after confirmation.";
+          ? @"تحديد حتى 100 رسالة من رسائلك بالكروب المفتوح، والحذف يتم فقط بزر تيليجرام الرسمي. يتطلب VoidGram متوافق."
+          : @"Select up to 100 of your messages in the current group. Delete manually using Telegram's own button. Requires compatible VoidGram.";
     }
 
     UISwitch *toggle = (UISwitch *)cell.accessoryView;

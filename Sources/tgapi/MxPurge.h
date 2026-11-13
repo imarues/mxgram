@@ -3,8 +3,8 @@
 @class MTRequest;
 @class MTRequestMessageService;
 
-// Wire-only: identify authenticated peer/request service. No requests sent
-// without explicit user confirmation in that exact currently visible chat.
+// Native-selection-only integration. The legacy request capture symbol remains
+// for hook compatibility but never sends or decodes deletion RPCs.
 #ifdef __cplusplus
 extern "C" {
 #endif
