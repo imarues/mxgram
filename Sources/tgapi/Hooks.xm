@@ -1,4 +1,5 @@
 #import "Headers.h"
+#import "MxPurge.h"
 #include <zlib.h>
 
 // Forward declaration — defined later in this file, used inside hooked_block
@@ -117,6 +118,9 @@ static BOOL mxNeedsResponsePatching(void) {
         %hook MTRequestMessageService
 
     - (void)addRequest : (MTRequest *)request {
+  // Capture only peer-targeted API requests for the current account.
+  // Purge may use their exact InputPeer; no deletion happens from this hook.
+  MxPurgeCaptureRequest(request, self);
   if (request.fakeData) {
     @try {
       if (request.completed) {
