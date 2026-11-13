@@ -1,0 +1,205 @@
+// MTProto codec for "Delete My Messages".
+// The only searched peer is the one captured from Telegram's authenticated
+// request in the currently displayed chat. Never use a global dialog search.
+import Foundation
+import tgapiC
+
+@objc(MxPurgeCodec)
+final class MxPurgeCodec: NSObject {
+    private static func unpack(_ ns: NSData) -> Data? {
+        let raw = ns as Data
+        guard raw.count >= 4 else { return nil }
+        let first = raw.withUnsafeBytes { $0.load(as: Int32.self) }
+        if first != Int32(bitPattern: 0x3072CFA1) { return raw }
+        // Handle compressed search results in the same way as TLParser.
+        guard raw.count > 4 else { return nil }
+        return raw.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return nil }
+            return decompressGzip(base.advanced(by: 4), raw.count - 4) as Data?
+        }
+    }
+
+    private static func readPeer(_ data: Data) -> Api.InputPeer? {
+        let r = BufferReader(Buffer(data: data))
+        guard let sign = r.readInt32() else { return nil }
+        return Api.parse(r, signature: sign) as? Api.InputPeer
+    }
+
+    private static func key(_ peer: Api.InputPeer) -> String? {
+        switch peer {
+        case let .inputPeerUser(x): return "0:\(x.userId)"
+        case let .inputPeerChat(x): return "1:\(x.chatId)"
+        case let .inputPeerChannel(x): return "2:\(x.channelId)"
+        default: return nil
+        }
+    }
+
+    private static func peerInfo(_ peer: Api.InputPeer) -> NSDictionary? {
+        guard let k = key(peer) else { return nil }
+        let b = Buffer()
+        peer.serialize(b, true)
+        return ["key": k, "peerData": b.makeData() as NSData]
+    }
+
+    // Capture a typed peer only for API methods whose first argument is known.
+    // Reject unknown constructors and wrappers rather than guess an offset.
+    @objc(peerFromRequest:)
+    static func peerFromRequest(_ ns: NSData) -> NSDictionary? {
+        let r = BufferReader(Buffer(data: ns as Data))
+        guard let method = r.readInt32() else { return nil }
+        let peerFirst: Set<Int32> = [
+            1143203525, // messages.getHistory
+            238054714, // messages.readHistory
+            -871347913 // channels.readHistory uses InputChannel, rejected below
+        ]
+        let flagsFirst: Set<Int32> = [
+            703497338, // messages.search
+            -17526942, // messages.sendMessage
+            53536639 // messages.sendMedia
+        ]
+        if flagsFirst.contains(method) {
+            guard r.readInt32() != nil else { return nil }
+        } else if !peerFirst.contains(method) {
+            return nil
+        }
+        guard let sig = r.readInt32(),
+              let peer = Api.parse(r, signature: sig) as? Api.InputPeer else { return nil }
+        return peerInfo(peer)
+    }
+
+    // Recover only the actual ChatLocation.peer's Postbox PeerId. The
+    // namespace makes a user id, basic-group id and channel id distinct.
+    private static func numeric(_ obj: Any, depth: Int = 0) -> Int64? {
+        if depth > 5 { return nil }
+        if let n = obj as? NSNumber { return n.int64Value }
+        if let n = obj as? Int64 { return n }
+        if let n = obj as? Int32 { return Int64(n) }
+        if let n = obj as? UInt32 { return Int64(n) }
+        for item in Mirror(reflecting: obj).children {
+            if ["rawValue", "_value", "value", "id", "namespace"].contains(item.label ?? "") {
+                if let val = numeric(item.value, depth: depth + 1) { return val }
+            }
+        }
+        return nil
+    }
+    private static func peerIdKey(_ obj: Any, depth: Int = 0) -> String? {
+        if depth > 7 { return nil }
+        let mirror = Mirror(reflecting: obj)
+        if let ns = mirror.children.first(where: { $0.label == "namespace" }),
+           let id = mirror.children.first(where: { $0.label == "id" }),
+           let namespace = numeric(ns.value), let peer = numeric(id.value),
+           (0...2).contains(namespace), peer > 0 {
+            return "\(namespace):\(peer)"
+        }
+        for child in mirror.children {
+            if let found = peerIdKey(child.value, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+
+    // Do not walk controller.context or any message fields: they contain many
+    // unrelated PeerIds. Only a field explicitly called chatLocation is valid.
+    @objc(chatKeyForController:)
+    static func chatKeyForController(_ controller: AnyObject) -> NSString? {
+        var mirror: Mirror? = Mirror(reflecting: controller)
+        while let m = mirror {
+            for item in m.children where item.label == "chatLocation" {
+                // A thread's peer id is not enough to scope search by topic:
+                // never offer the action on reply-thread screens.
+                let desc = String(describing: item.value)
+                guard desc.contains("peer") && !desc.contains("replyThread") else { return nil }
+                return peerIdKey(item.value) as NSString?
+            }
+            mirror = m.superclassMirror
+        }
+        return nil
+    }
+
+    @objc(makeSelfCheck)
+    static func makeSelfCheck() -> NSData {
+        let call = Api.functions.users.getUsers(id: [.inputUserSelf])
+        return call.1.makeData() as NSData
+    }
+
+    @objc(selfIdFromResponse:)
+    static func selfIdFromResponse(_ data: NSData) -> NSNumber? {
+        guard let bytes = unpack(data) else { return nil }
+        let r = BufferReader(Buffer(data: bytes))
+        guard r.readInt32() == 481674261,
+              let users = Api.parseVector(r, elementSignature: 0, elementType: Api.User.self) else {
+            return nil
+        }
+        for u in users {
+            if case let .user(d) = u, (d.flags & (1 << 10)) != 0 {
+                return NSNumber(value: d.id)
+            }
+        }
+        // users.getUsers(inputUserSelf) returns exactly the active account.
+        if users.count == 1, case let .user(d) = users[0] {
+            return NSNumber(value: d.id)
+        }
+        return nil
+    }
+
+    @objc(makeSearchForPeer:offset:limit:)
+    static func makeSearchForPeer(_ peerBytes: NSData, offset: Int32, limit: Int32) -> NSData? {
+        guard let peer = readPeer(peerBytes as Data),
+              key(peer) != nil else { return nil }
+        let call = Api.functions.messages.search(
+            flags: 1, peer: peer, q: "", fromId: .inputPeerSelf,
+            savedPeerId: nil, savedReaction: nil, topMsgId: nil,
+            filter: .inputMessagesFilterEmpty, minDate: 0, maxDate: 0,
+            offsetId: offset, addOffset: 0, limit: limit,
+            maxId: 0, minId: 0, hash: 0
+        )
+        return call.1.makeData() as NSData
+    }
+
+    @objc(searchResult:)
+    static func searchResult(_ data: NSData) -> NSDictionary? {
+        guard let bytes = unpack(data) else { return nil }
+        let r = BufferReader(Buffer(data: bytes))
+        guard let sign = r.readInt32(),
+              let response = Api.parse(r, signature: sign) as? Api.messages.Messages else { return nil }
+        let messages: [Api.Message]
+        switch response {
+        case let .messages(d): messages = d.messages
+        case let .messagesSlice(d): messages = d.messages
+        case let .channelMessages(d): messages = d.messages
+        default: return nil
+        }
+        var ids: [NSNumber] = []
+        for message in messages {
+            if case let .message(d) = message, d.id > 0 {
+                ids.append(NSNumber(value: d.id))
+            }
+        }
+        return ["ids": ids, "returned": messages.count]
+    }
+
+    @objc(makeDeleteForPeer:ids:)
+    static func makeDeleteForPeer(_ peerBytes: NSData, ids: [NSNumber]) -> NSData? {
+        guard let peer = readPeer(peerBytes as Data),
+              key(peer) != nil, !ids.isEmpty, ids.count <= 100 else { return nil }
+        let unique = Array(Set(ids.compactMap { $0.int32Value > 0 ? $0.int32Value : nil }))
+        guard !unique.isEmpty else { return nil }
+        switch peer {
+        case let .inputPeerChannel(d):
+            let channel = Api.InputChannel.inputChannel(
+                Api.InputChannel.Cons_inputChannel(channelId: d.channelId, accessHash: d.accessHash))
+            return Api.functions.channels.deleteMessages(channel: channel, id: unique).1.makeData() as NSData
+        case .inputPeerUser, .inputPeerChat:
+            // revoke=1 means delete for everyone for this account-owned message.
+            return Api.functions.messages.deleteMessages(flags: 1, id: unique).1.makeData() as NSData
+        default: return nil
+        }
+    }
+
+    @objc(deleteSucceeded:)
+    static func deleteSucceeded(_ data: NSData) -> Bool {
+        guard let bytes = unpack(data) else { return false }
+        let r = BufferReader(Buffer(data: bytes))
+        guard let sig = r.readInt32() else { return false }
+        return Api.parse(r, signature: sig) is Api.messages.AffectedMessages
+    }
+}
