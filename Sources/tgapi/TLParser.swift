@@ -2501,13 +2501,10 @@ class TLParser: NSObject {
         guard case let .inputMediaUploadedDocument(data) = media else { return nil }
 
         var fileName: String?
-        var existingAudio: Api.DocumentAttribute.Cons_documentAttributeAudio?
         for attribute in data.attributes {
             switch attribute {
             case let .documentAttributeFilename(nameData):
                 fileName = nameData.fileName
-            case let .documentAttributeAudio(audioData):
-                existingAudio = audioData
             default:
                 break
             }
@@ -2539,24 +2536,7 @@ class TLParser: NSObject {
             diag("v2v wire: \(names) -> voice, \(upload.duration)s")
             newAttributes = [voiceAttribute(upload)]
             newMimeType = "audio/mp4"
-        } else if UserDefaults.standard.bool(forKey: "MxSendAsVoice"),
-                  let audio = existingAudio,
-                  (Int(audio.flags) & (1 << 10)) == 0 {
-            // Send as Voice: an audio file Telegram already described, with a
-            // duration read from the file itself. Only the voice bit is added —
-            // inventing a waveform for a file we never decoded would draw a
-            // shape that has nothing to do with the sound.
-            diag("send-as-voice wire: \(audio.duration)s")
-            newAttributes = data.attributes.map { attribute in
-                guard case let .documentAttributeAudio(audioData) = attribute else { return attribute }
-                return Api.DocumentAttribute.documentAttributeAudio(
-                    Api.DocumentAttribute.Cons_documentAttributeAudio(
-                        flags: audioData.flags | (1 << 10),
-                        duration: audioData.duration,
-                        title: audioData.title,
-                        performer: audioData.performer,
-                        waveform: audioData.waveform))
-            }
+
         }
 
         guard let attributes = newAttributes else { return nil }
