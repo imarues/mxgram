@@ -38,7 +38,7 @@ bool shouldFixFilePicker() {
     
     NSURL *url = docUrl;
     
-    NSString *customFolderName = [NSString stringWithFormat:@"mx-%@", [[NSUUID UUID] UUIDString]];
+    NSString *customFolderName = [NSString stringWithFormat:@"kira-%@", [[NSUUID UUID] UUIDString]];
 	NSString *uglyHackPath = [NSTemporaryDirectory() stringByAppendingPathComponent:FILE_PICKER_PATH];
 	NSString *ourPath = [uglyHackPath stringByAppendingPathComponent:customFolderName];
 		
@@ -69,7 +69,7 @@ bool shouldFixFilePicker() {
     NSMutableArray *newURLs = [NSMutableArray array];
 	
     if (urls.count > 0) {
-        NSString *customFolderName = [NSString stringWithFormat:@"mx-%@", [[NSUUID UUID] UUIDString]];
+        NSString *customFolderName = [NSString stringWithFormat:@"kira-%@", [[NSUUID UUID] UUIDString]];
         NSString *uglyHackPath = [NSTemporaryDirectory() stringByAppendingPathComponent:FILE_PICKER_PATH];
 		NSString *ourPath = [uglyHackPath stringByAppendingPathComponent:customFolderName];
         

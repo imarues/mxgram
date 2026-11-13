@@ -52,7 +52,7 @@ static BOOL mxNeedsResponsePatching(void) {
       functionID == kMessagesUploadMedia) {
     NSData *asVoice = [TLParser rewriteVoiceUpload:payload];
     if (asVoice) {
-      customLog2(@"[Mx] rewrote outgoing media as voice or round video note");
+      customLog2(@"[Kira] rewrote outgoing media as voice or round video note");
       payload = asVoice;
     }
   }
@@ -387,7 +387,7 @@ static BOOL mxNeedsResponsePatching(void) {
   if (data && data.length >= 4) {
     int32_t ctor = 0;
     memcpy(&ctor, data.bytes, 4);
-    // customLog2(@"[Mx] parseMessage: len=%lu ctor=0x%08X", (unsigned
+    // customLog2(@"[Kira] parseMessage: len=%lu ctor=0x%08X", (unsigned
     // long)data.length, (uint32_t)ctor);
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -399,7 +399,7 @@ static BOOL mxNeedsResponsePatching(void) {
       NSData *modifiedData = neutralizePayload(
           data, antiRevoke, antiSelfDestruct);
       if (modifiedData) {
-        customLog2(@"[Mx] parseMessage: NEUTRALIZED (antiRevoke=%d "
+        customLog2(@"[Kira] parseMessage: NEUTRALIZED (antiRevoke=%d "
                    @"antiSelfDestruct=%d)",
                    antiRevoke, antiSelfDestruct);
         data = modifiedData;
@@ -436,7 +436,7 @@ static BOOL mxNeedsResponsePatching(void) {
       NSData *strippedData =
           [NSClassFromString(@"TLParser") stripAntiSelfDestruct:uncompressed];
       if (strippedData) {
-        customLog2(@"[Mx] parseMessage: STRIPPED SELF-DESTRUCT");
+        customLog2(@"[Kira] parseMessage: STRIPPED SELF-DESTRUCT");
         data = strippedData;
         modified = YES;
       }

@@ -8,7 +8,7 @@
 #import <math.h>
 #import "UI/Headers.h"
 
-// Sideload injection often includes only Mx.dylib (no updated Mx.bundle).
+// Sideload injection often includes only Kira.dylib (no updated Kira.bundle).
 // Keep the newly introduced picker strings available in Arabic directly;
 // otherwise users with an Arabic interface see English labels.
 static BOOL mxCropArabicInterface(void) {

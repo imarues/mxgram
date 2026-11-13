@@ -66,7 +66,7 @@ static BOOL mxVideoToNoteEnabled(void) {
 }
 
 static NSString *mxVoiceCacheRoot(void) {
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"MxVideoToVoice"];
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"KiraVideoToVoice"];
 }
 
 // Every extraction gets a fresh directory and nothing is ever reused. Sending
@@ -402,7 +402,7 @@ static NSDictionary *mxRewriteToVoice(id anyDict, id editingContext) {
 // This is a *real* Telegram video note, not a circular-looking preview.
 // ------------------------------------------------------------
 static NSString *mxNoteCacheRoot(void) {
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"MxVideoNotes"];
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"KiraVideoNotes"];
 }
 
 static NSURL *mxNewNoteOutputURL(NSString *baseName) {
@@ -416,7 +416,7 @@ static NSURL *mxNewNoteOutputURL(NSString *baseName) {
     }
     NSString *stem = [baseName isKindOfClass:[NSString class]] && baseName.length
         ? [baseName stringByDeletingPathExtension] : @"video";
-    NSString *name = [NSString stringWithFormat:@"mxnote_%@_%@.mp4",
+    NSString *name = [NSString stringWithFormat:@"kiranote_%@_%@.mp4",
         stem, [[NSUUID UUID] UUIDString]];
     return [NSURL fileURLWithPath:[dir stringByAppendingPathComponent:name]];
 }
@@ -629,7 +629,7 @@ static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext,
 // ============================================================
 // The toggle, in the video preview itself.
 //
-// It used to live only in the Mx menu, which meant turning the feature on
+// It used to live only in the Kira menu, which meant turning the feature on
 // converted every video sent afterwards until you remembered to turn it back
 // off. Here you decide per video, with the clip in front of you.
 //

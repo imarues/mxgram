@@ -72,14 +72,14 @@ static id boostedFetchingStateInit(id self, SEL _cmd,
             strstr(name, "FetchImpl") &&
             strstr(name, "FetchingState")) {
             target = classes[i];
-            customLog2(@"[Mx] Found FetchingState class: %s", name);
+            customLog2(@"[Kira] Found FetchingState class: %s", name);
             break;
         }
     }
     free(classes);
 
     if (!target) {
-        customLog2(@"[Mx] FetchingState class not found — boost unavailable");
+        customLog2(@"[Kira] FetchingState class not found — boost unavailable");
         return;
     }
 
@@ -94,7 +94,7 @@ static id boostedFetchingStateInit(id self, SEL _cmd,
         for (unsigned int j = 0; j < methodCount; j++) {
             if (method_getNumberOfArguments(methods[j]) == 10) { // self + cmd + 8 params
                 m = methods[j];
-                customLog2(@"[Mx] Found init by arg count: %s", sel_getName(method_getName(m)));
+                customLog2(@"[Kira] Found init by arg count: %s", sel_getName(method_getName(m)));
                 break;
             }
         }
@@ -102,13 +102,13 @@ static id boostedFetchingStateInit(id self, SEL _cmd,
     }
 
     if (!m) {
-        customLog2(@"[Mx] FetchingState init not found");
+        customLog2(@"[Kira] FetchingState init not found");
         return;
     }
 
     originalFetchingStateInit = (FetchingStateInitIMP)method_getImplementation(m);
     method_setImplementation(m, (IMP)boostedFetchingStateInit);
-    customLog2(@"[Mx] Download boost installed on %s", class_getName(target));
+    customLog2(@"[Kira] Download boost installed on %s", class_getName(target));
 }
 
 @end

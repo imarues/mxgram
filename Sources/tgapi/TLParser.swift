@@ -18,7 +18,7 @@ class TLParser: NSObject {
     // not, and does not need to: it covers private chats and basic groups,
     // whose ids all come from one per-account sequence. Those are stored under
     // cloudScope and match any non-channel message.
-    private static let deletedQueue = DispatchQueue(label: "com.mx.deletedIds",
+    private static let deletedQueue = DispatchQueue(label: "com.kira.deletedIds",
                                                     attributes: .concurrent)
     private static let cloudScope: Int64 = 0
     /// Every scope a given id was deleted from.
@@ -110,7 +110,7 @@ class TLParser: NSObject {
     /// Writes take a barrier synchronously rather than asynchronously: a single
     /// pass over a response records an original and then reads it back, so the
     /// ordering has to be deterministic.
-    private static let editQueue = DispatchQueue(label: "com.mx.editHistory",
+    private static let editQueue = DispatchQueue(label: "com.kira.editHistory",
                                                  attributes: .concurrent)
 
     /// What identifies a message: the conversation together with the number.
@@ -176,7 +176,7 @@ class TLParser: NSObject {
 
     // MARK: - Custom Stars balance (display only)
 
-    /// The number the user typed in the Mx menu, or nil when the feature is
+    /// The number the user typed in the Kira menu, or nil when the feature is
     /// off. Purely cosmetic: the server keeps its own count, so anything that
     /// actually spends stars still fails exactly as it would have.
     private static var customStarsBalance: Int64? {
@@ -231,7 +231,7 @@ class TLParser: NSObject {
     /// Mirrors the mxDiag() macro in Logger.h. os_log with an explicit
     /// {public} annotation, because both NSLog and unannotated os_log redact
     /// string arguments to "<private>" before they reach the device syslog.
-    private static let diagLog = OSLog(subsystem: "com.m1ronx.mx", category: "diag")
+    private static let diagLog = OSLog(subsystem: "com.ikiraplus.kira", category: "diag")
 
     /// Swift-side master switch for diagnostic logging. Must be kept in step
     /// with MX_DIAG in Logger.h, which a Swift file cannot see. Left on, the
@@ -247,7 +247,7 @@ class TLParser: NSObject {
     /// capped, so a device log shows what actually flows through without
     /// drowning in per-message noise. Diagnostic only.
     private static var seenSignatures = Set<Int32>()
-    private static let signatureQueue = DispatchQueue(label: "com.mx.diagSignatures")
+    private static let signatureQueue = DispatchQueue(label: "com.kira.diagSignatures")
 
     private static func diagSignature(_ signature: Int32) {
         guard diagEnabled else { return }
@@ -1221,7 +1221,7 @@ class TLParser: NSObject {
     /// object it can walk, which on this fork it does not — so entries were
     /// filed with no name and the list showed a bare numeric ID. The wire
     /// carries the same two fields and needs no cooperation from the app.
-    private static let peerNameQueue = DispatchQueue(label: "com.mx.peerNames",
+    private static let peerNameQueue = DispatchQueue(label: "com.kira.peerNames",
                                                      attributes: .concurrent)
     private static var _peerNames = [Int64: [String: String]]()
 
@@ -2089,16 +2089,16 @@ class TLParser: NSObject {
         let buffer = Buffer(data: data as Data)
         let reader = BufferReader(buffer)
         guard let signature = reader.readInt32() else { 
-            NSLog("[Mx] parseForwardRequest: Failed to read signature")
+            NSLog("[Kira] parseForwardRequest: Failed to read signature")
             return nil 
         }
         
         if signature != 326126204 {
-            // NSLog("[Mx] parseForwardRequest: Unexpected signature %d", signature)
+            // NSLog("[Kira] parseForwardRequest: Unexpected signature %d", signature)
             return nil
         }
         
-        NSLog("[Mx] parseForwardRequest: Detected forwardMessages")
+        NSLog("[Kira] parseForwardRequest: Detected forwardMessages")
         
         let _ = reader.readInt32() ?? 0
         
@@ -2124,8 +2124,8 @@ class TLParser: NSObject {
               let toPeer = Api.parse(reader, signature: toSig) as? Api.InputPeer else { return nil }
         
         switch toPeer {
-        case let .inputPeerUser(data): NSLog("[Mx]   Target User: id=%lld, hash=%lld", data.userId, data.accessHash)
-        case let .inputPeerChannel(data): NSLog("[Mx]   Target Channel: id=%lld, hash=%lld", data.channelId, data.accessHash)
+        case let .inputPeerUser(data): NSLog("[Kira]   Target User: id=%lld, hash=%lld", data.userId, data.accessHash)
+        case let .inputPeerChannel(data): NSLog("[Kira]   Target Channel: id=%lld, hash=%lld", data.channelId, data.accessHash)
         default: break
         }
               
@@ -2134,9 +2134,9 @@ class TLParser: NSObject {
 
     @objc(handleForwardRequest:)
     static func handleForwardRequest(_ data: NSData) -> Bool {
-        NSLog("[Mx] handleForwardRequest called")
+        NSLog("[Kira] handleForwardRequest called")
         guard let request = parseForwardRequest(data) else { 
-            NSLog("[Mx] handleForwardRequest: Failed to parse forward request")
+            NSLog("[Kira] handleForwardRequest: Failed to parse forward request")
             return false 
         }
         
@@ -2148,7 +2148,7 @@ class TLParser: NSObject {
         default: fromId = 0
         }
         
-        NSLog("[Mx] handleForwardRequest: fromId = \(fromId)")
+        NSLog("[Kira] handleForwardRequest: fromId = \(fromId)")
         // For now, if the setting is ON, we hijack ALL forwards from channels or chats to be safe.
         return fromId != 0
     }
@@ -2172,7 +2172,7 @@ class TLParser: NSObject {
     @objc(createSendMediaRequests:originalForwardData:)
     static func createSendMediaRequests(_ response: Any, originalForwardData: NSData) -> [NSData] {
         guard let messagesResponse = response as? Api.messages.Messages else { 
-            NSLog("[Mx] Failed to cast response to Api.messages.Messages")
+            NSLog("[Kira] Failed to cast response to Api.messages.Messages")
             return [] 
         }
         
@@ -2186,7 +2186,7 @@ class TLParser: NSObject {
         default: break
         }
         
-        NSLog("[Mx] Cloning %d messages", messages.count)
+        NSLog("[Kira] Cloning %d messages", messages.count)
         
         return messages.compactMap { msg -> NSData? in
             guard case let .message(data) = msg else { return nil }
@@ -2196,17 +2196,17 @@ class TLParser: NSObject {
                 switch media {
                 case let .messageMediaPhoto(m):
                     if let photo = m.photo, case let .photo(p) = photo {
-                        NSLog("[Mx]   Detected Photo: id=%lld, accessHash=%lld, refLen=%d", p.id, p.accessHash, p.fileReference.size)
+                        NSLog("[Kira]   Detected Photo: id=%lld, accessHash=%lld, refLen=%d", p.id, p.accessHash, p.fileReference.size)
                         inputMedia = .inputMediaPhoto(Api.InputMedia.Cons_inputMediaPhoto(flags: 0, id: .inputPhoto(Api.InputPhoto.Cons_inputPhoto(id: p.id, accessHash: p.accessHash, fileReference: p.fileReference)), ttlSeconds: nil, video: nil))
                     } else {
-                        NSLog("[Mx]   Photo media but photo is empty")
+                        NSLog("[Kira]   Photo media but photo is empty")
                     }
                 case let .messageMediaDocument(m):
                     if let document = m.document, case let .document(d) = document {
-                        NSLog("[Mx]   Detected Document: id=%lld, accessHash=%lld, refLen=%d", d.id, d.accessHash, d.fileReference.size)
+                        NSLog("[Kira]   Detected Document: id=%lld, accessHash=%lld, refLen=%d", d.id, d.accessHash, d.fileReference.size)
                         inputMedia = .inputMediaDocument(Api.InputMedia.Cons_inputMediaDocument(flags: 0, id: .inputDocument(Api.InputDocument.Cons_inputDocument(id: d.id, accessHash: d.accessHash, fileReference: d.fileReference)), videoCover: nil, videoTimestamp: nil, ttlSeconds: nil, query: nil))
                     } else {
-                        NSLog("[Mx]   Document media but document is empty")
+                        NSLog("[Kira]   Document media but document is empty")
                     }
                 case let .messageMediaGeo(m):
                     if case let .geoPoint(gp) = m.geo {
@@ -2219,14 +2219,14 @@ class TLParser: NSObject {
                         inputMedia = .inputMediaVenue(Api.InputMedia.Cons_inputMediaVenue(geoPoint: .inputGeoPoint(Api.InputGeoPoint.Cons_inputGeoPoint(flags: 0, lat: gp.lat, long: gp.long, accuracyRadius: nil)), title: m.title, address: m.address, provider: m.provider, venueId: m.venueId, venueType: m.venueType))
                     }
                 case .messageMediaWebPage(_):
-                    NSLog("[Mx]   Detected WebPage, sending as text fallback")
+                    NSLog("[Kira]   Detected WebPage, sending as text fallback")
                     inputMedia = nil
                 default:
-                    NSLog("[Mx]   Unsupported media type: \(String(describing: media))")
+                    NSLog("[Kira]   Unsupported media type: \(String(describing: media))")
                     inputMedia = nil
                 }
             } else {
-                NSLog("[Mx]   No media in message")
+                NSLog("[Kira]   No media in message")
             }
             
             var flags: Int32 = 0x80
@@ -2251,7 +2251,7 @@ class TLParser: NSObject {
                 // 3. Media
                 im.serialize(buffer, true)
                 
-                NSLog("[Mx]   Created NATIVE-ALIGNED sendMedia payload (len: %d)", buffer.size)
+                NSLog("[Kira]   Created NATIVE-ALIGNED sendMedia payload (len: %d)", buffer.size)
                 return buffer.makeData() as NSData
             } else {
                 // Send as text only if no media or media not supported
@@ -2272,7 +2272,7 @@ class TLParser: NSObject {
                     suggestedPost: nil,
                     richMessage: nil
                 )
-                NSLog("[Mx]   Created sendMessage payload (len: %d)", sendMessage.1.size)
+                NSLog("[Kira]   Created sendMessage payload (len: %d)", sendMessage.1.size)
                 return sendMessage.1.makeData() as NSData
             }
         }
@@ -2284,12 +2284,12 @@ class TLParser: NSObject {
         if workingData.count >= 4 {
             let signature = workingData.withUnsafeBytes { $0.load(as: UInt32.self) }
             if signature == 0x3072CFA1 { // gzip_packed
-                NSLog("[Mx] parseMessagesResponse: Detected GZIP, decompressing...")
+                NSLog("[Kira] parseMessagesResponse: Detected GZIP, decompressing...")
                 if let decompressed = decompressGzip(workingData.withUnsafeBytes { $0.baseAddress?.advanced(by: 4) }, workingData.count - 4) {
                     workingData = decompressed as Data
-                    NSLog("[Mx] parseMessagesResponse: GZIP decompressed success (new len: \(workingData.count))")
+                    NSLog("[Kira] parseMessagesResponse: GZIP decompressed success (new len: \(workingData.count))")
                 } else {
-                    NSLog("[Mx] parseMessagesResponse: GZIP decompression FAILED")
+                    NSLog("[Kira] parseMessagesResponse: GZIP decompression FAILED")
                 }
             }
         }
@@ -2297,7 +2297,7 @@ class TLParser: NSObject {
         let buffer = Buffer(data: workingData)
         let reader = BufferReader(buffer)
         guard let signature = reader.readInt32() else { 
-            NSLog("[Mx] parseMessagesResponse: Failed to read signature")
+            NSLog("[Kira] parseMessagesResponse: Failed to read signature")
             return nil 
         }
         return Api.parse(reader, signature: signature)
@@ -2334,7 +2334,7 @@ class TLParser: NSObject {
     // The MediaPicker rewrites the selected item to a file. Telegram may then
     // replace its filename while uploading, so look up both the document
     // filename attribute AND the actual InputFile.name on the wire.
-    private static let roundQueue = DispatchQueue(label: "com.mx.roundUploads")
+    private static let roundQueue = DispatchQueue(label: "com.kira.roundUploads")
     private static var _roundUploads = [String: RoundVideoUpload]()
     private static var _roundOrder = [String]()
     private static var _roundFallbackUsed = Set<String>()
@@ -2392,7 +2392,7 @@ class TLParser: NSObject {
         let registeredAt: TimeInterval
     }
 
-    private static let voiceQueue = DispatchQueue(label: "com.mx.voiceUploads")
+    private static let voiceQueue = DispatchQueue(label: "com.kira.voiceUploads")
     private static var _voiceUploads = [String: VoiceUpload]()
     private static var _voiceOrder = [String]()
     private static var _voiceFallbackUsed = Set<String>()

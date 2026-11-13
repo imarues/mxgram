@@ -64,7 +64,7 @@ __attribute__((constructor(101))) static void MxMigrateDefaultsFromLead(void) {
     [defaults synchronize];
 
     if (moved > 0) {
-      NSLog(@"[Mx] migrated %lu setting(s) from Lead", (unsigned long)moved);
+      NSLog(@"[Kira] migrated %lu setting(s) from Lead", (unsigned long)moved);
     }
   }
 }

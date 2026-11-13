@@ -8,7 +8,6 @@
 @property (atomic, assign, readonly) UIView *view;
 @property (atomic, copy, readonly) NSArray *subnodes;
 @property (atomic, copy, readwrite) NSString *accessibilityLabel;
-@property (nonatomic, strong) UILongPressGestureRecognizer *mxLongPressGesture;
 - (ASDisplayNode *)supernode;
 - (void)setNeedsLayout;
 - (void)layoutIfNeeded;
@@ -438,9 +437,9 @@ void showUI() {
 //         cv.clipsToBounds = NO;
 // 
 //         [cv addSubview:mxBtn];
-//         customLog2(@"[Mx] shield button injected h=%.0f", h);
+//         customLog2(@"[Kira] shield button injected h=%.0f", h);
 //     } @catch (NSException *e) {
-//         customLog2(@"[Mx] shield inject error: %@", e);
+//         customLog2(@"[Kira] shield inject error: %@", e);
 //     }
 // }
 // 
@@ -495,11 +494,11 @@ static BOOL injectBadgeToNode(ASDisplayNode *textNode, ASDisplayNode *headerNode
         if (peerId == 0) return NO;
 
         NSString *prefix = nil;
-        UIColor *badgeColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0]; // Mx Blue
+        UIColor *badgeColor = [UIColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0]; // Kira Blue
 
         // Add your IDs here
         if (peerId == 5576711589 || peerId == 7846965839) {
-            prefix = @"👑 Mx Owner";
+            prefix = @"👑 Kira Owner";
             badgeColor = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0]; // Gold
         } else {
             NSNumber *currId = [NSClassFromString(@"TLParser") performSelector:@selector(getCurrentUserId)];
@@ -1411,7 +1410,7 @@ static Class mxChatControllerClass(void) {
 
 __attribute__((constructor))
 static void hook() {
-    NSLog(@"[Mx] Tweak initializing...");
+    NSLog(@"[Kira] Tweak initializing...");
 
     // Intents.framework is loaded on the second runloop turn rather than here.
     // A tweak constructor runs inside dyld, before the app has drawn anything,
@@ -1424,12 +1423,12 @@ static void hook() {
             Class inPreferencesClass = objc_getClass("INPreferences");
             if (inPreferencesClass) {
                 %init(SiriBypassHooks, INPreferences = inPreferencesClass);
-                NSLog(@"[Mx] SiriBypassHooks initialized");
+                NSLog(@"[Kira] SiriBypassHooks initialized");
             } else {
-                NSLog(@"[Mx] SiriBypassHooks init failed: INPreferences class not found");
+                NSLog(@"[Kira] SiriBypassHooks init failed: INPreferences class not found");
             }
         } @catch (NSException *e) {
-            NSLog(@"[Mx] SiriBypassHooks init failed: %@", e);
+            NSLog(@"[Kira] SiriBypassHooks init failed: %@", e);
         }
     });
 
@@ -1461,10 +1460,10 @@ static void hook() {
             Class asControlNodeClass = objc_getClass("ASControlNode");
             if (asControlNodeClass) {
                 %init(CallConfirmHooks, ASControlNode = asControlNodeClass);
-                NSLog(@"[Mx] CallConfirmHooks initialized");
+                NSLog(@"[Kira] CallConfirmHooks initialized");
             }
         } @catch (NSException *e) {
-            NSLog(@"[Mx] CallConfirmHooks init failed: %@", e);
+            NSLog(@"[Kira] CallConfirmHooks init failed: %@", e);
         }
 
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
