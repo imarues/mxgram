@@ -6,8 +6,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void MxPresentVideoNoteCrop(UIView *sourceView, id galleryItem, CGPoint initialCenter,
-                            BOOL alreadySelected, void (^onApply)(CGPoint center),
+void MxPresentVideoNoteCrop(UIView *sourceView, id galleryItem,
+                            CGPoint initialCenter, CGFloat initialZoom,
+                            BOOL alreadySelected,
+                            void (^onApply)(CGPoint center, CGFloat zoom),
                             dispatch_block_t onSendNormally);
 #ifdef __cplusplus
 }

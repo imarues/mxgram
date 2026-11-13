@@ -160,7 +160,7 @@
 "VIDEO_TO_NOTE_SUCCESS" = "Round video ready — sending";
 "VIDEO_TO_NOTE_FAILED" = "Could not convert video — sending the original video instead";
 "VIDEO_NOTE_CROP_TITLE" = "Choose video note crop";
-"VIDEO_NOTE_CROP_HINT" = "Drag the circle, tap Apply, then send in Telegram.";
+"VIDEO_NOTE_CROP_HINT" = "Drag to move, pinch with two fingers to zoom, then Apply and Send.";
 "VIDEO_NOTE_CROP_APPLY" = "Apply";
 "VIDEO_NOTE_CROP_NORMAL" = "Normal video";
 "VIDEO_NOTE_CROP_LOADING" = "Loading video preview…";

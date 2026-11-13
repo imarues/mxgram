@@ -423,6 +423,7 @@ static NSURL *mxNewNoteOutputURL(NSString *baseName) {
 
 // Session-only crop state, locked because export can run off the UI queue.
 static CGPoint mxNoteCropCenter = {0.5, 0.5};
+static CGFloat mxNoteCropZoom = 1.0;
 static NSString *mxNoteSelectedAsset = nil;
 static NSObject *mxNoteCropLock(void) {
     static NSObject *lock = nil;
@@ -456,15 +457,17 @@ static NSString *mxNoteItemKey(id item) {
     }
     return nil;
 }
-static void mxStoreNoteCrop(CGPoint crop, NSString *assetKey) {
+static void mxStoreNoteCrop(CGPoint crop, CGFloat zoom, NSString *assetKey) {
     @synchronized (mxNoteCropLock()) {
         mxNoteCropCenter = crop;
+        mxNoteCropZoom = isfinite(zoom) ? fmax(1.0, fmin(5.0, zoom)) : 1.0;
         mxNoteSelectedAsset = [assetKey copy];
     }
 }
 static NSDictionary *mxNoteCropSnapshot(void) {
     @synchronized (mxNoteCropLock()) {
         return @{@"x": @(mxNoteCropCenter.x), @"y": @(mxNoteCropCenter.y),
+                 @"zoom": @(mxNoteCropZoom),
                  @"asset": mxNoteSelectedAsset ?: @""};
     }
 }
@@ -473,7 +476,8 @@ static NSDictionary *mxNoteCropSnapshot(void) {
 // notes. A video composition applies the natural rotation, centers the crop,
 // and renders the actual pixels at 640 x 640 before upload.
 static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
-                                 NSString *baseName, CGPoint cropCenter) {
+                                 NSString *baseName, CGPoint cropCenter,
+                                 CGFloat cropZoom) {
     AVAssetTrack *track = [asset tracksWithMediaType:AVMediaTypeVideo].firstObject;
     if (!track) {
         MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_FAILED"]);
@@ -501,7 +505,11 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
         return nil;
     }
     static const CGFloat side = 640.0;
-    CGFloat scale = MAX(side / width, side / height);
+    // The preview's circle diameter is (shorter side / cropZoom).
+    // Rendering that region into 640x640 zooms the content itself, and
+    // guarantees the exported pixels match the circle drawn in the picker.
+    CGFloat safeZoom = isfinite(cropZoom) ? fmax(1.0, fmin(5.0, cropZoom)) : 1.0;
+    CGFloat scale = MAX(side / width, side / height) * safeZoom;
     // Match the crop picker: center is normalized in the oriented video.
     CGFloat scaledWidth = width * scale;
     CGFloat scaledHeight = height * scale;
@@ -579,7 +587,8 @@ static NSURL *mxExportRoundVideo(AVAsset *asset, CMTimeRange selectedRange,
 }
 
 static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext,
-                                             CGPoint cropCenter, NSString *chosenAsset) {
+                                             CGPoint cropCenter, CGFloat cropZoom,
+                                             NSString *chosenAsset) {
     if (![anyDict isKindOfClass:[NSDictionary class]]) return nil;
     NSDictionary *dict = anyDict;
     NSString *type = dict[@"type"];
@@ -601,7 +610,7 @@ static NSDictionary *mxRewriteToRoundVideo(id anyDict, id editingContext,
     if ([item respondsToSelector:@selector(fileName)]) baseName = [item fileName];
     if (!baseName.length) baseName = dict[@"fileName"];
 
-    NSURL *output = mxExportRoundVideo(asset, range, baseName, cropCenter);
+    NSURL *output = mxExportRoundVideo(asset, range, baseName, cropCenter, cropZoom);
     if (!output) return nil; // On failure Telegram sends the original video.
 
     NSMutableDictionary *rewritten = [dict mutableCopy];
@@ -695,7 +704,7 @@ static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
     BOOL enabled = ![defaults boolForKey:kVideoToVoice];
     [defaults setBool:enabled forKey:kVideoToVoice];
     [defaults setBool:NO forKey:kVideoToNote];
-    mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
+    mxStoreNoteCrop(CGPointMake(0.5, 0.5), 1.0, nil);
     mxStyleVoiceButton(sender, enabled);
     mxStyleNoteButton((UIButton *)[sender.superview viewWithTag:kMxNoteButtonTag], NO);
     mxDiag("v2v: preview toggle -> %d", enabled);
@@ -719,11 +728,13 @@ static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
     CGPoint initial = selected
         ? CGPointMake([oldCrop[@"x"] doubleValue], [oldCrop[@"y"] doubleValue])
         : CGPointMake(0.5, 0.5);
+    CGFloat initialZoom = selected ? [oldCrop[@"zoom"] doubleValue] : 1.0;
     NSString *assetKey = mxNoteItemKey(item);
     __weak UIView *weakGallery = gallery;
 
-    MxPresentVideoNoteCrop(gallery, item, initial, selected, ^(CGPoint crop) {
-        mxStoreNoteCrop(crop, assetKey);
+    MxPresentVideoNoteCrop(gallery, item, initial, initialZoom, selected,
+                           ^(CGPoint crop, CGFloat zoom) {
+        mxStoreNoteCrop(crop, zoom, assetKey);
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults setBool:YES forKey:kVideoToNote];
         [defaults setBool:NO forKey:kVideoToVoice];
@@ -737,7 +748,7 @@ static void mxStyleNoteButton(UIButton *button, BOOL enabled) {
     }, ^{
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults setBool:NO forKey:kVideoToNote];
-        mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
+        mxStoreNoteCrop(CGPointMake(0.5, 0.5), 1.0, nil);
         UIView *view = weakGallery;
         mxStyleNoteButton((UIButton *)[view viewWithTag:kMxNoteButtonTag], NO);
         MxShowToast([MxLocalization localizedStringForKey:@"VIDEO_TO_NOTE_OFF_TOAST"]);
@@ -903,7 +914,7 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         [defaults setBool:NO forKey:kVideoToVoice];
         [defaults setBool:NO forKey:kVideoToNote];
-        mxStoreNoteCrop(CGPointMake(0.5, 0.5), nil);
+        mxStoreNoteCrop(CGPointMake(0.5, 0.5), 1.0, nil);
     }
     BOOL isVideo = mxItemIsVideo(item);
     objc_setAssociatedObject(self, kMxFocusedVideoItemKey, isVideo ? item : nil,
@@ -961,6 +972,7 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
     NSDictionary *noteSelection = noteMode ? mxNoteCropSnapshot() : nil;
     CGPoint crop = CGPointMake([noteSelection[@"x"] doubleValue],
                                [noteSelection[@"y"] doubleValue]);
+    CGFloat zoom = noteMode ? [noteSelection[@"zoom"] doubleValue] : 1.0;
     NSString *chosenAsset = noteSelection[@"asset"];
 
     MxDescriptionGenerator wrapped =
@@ -968,7 +980,7 @@ static void mxUpdateVoiceButton(UIView *interfaceView) {
             NSDictionary *rewritten = nil;
             @try {
                 rewritten = noteMode
-                    ? mxRewriteToRoundVideo(dict, editingContext, crop, chosenAsset)
+                    ? mxRewriteToRoundVideo(dict, editingContext, crop, zoom, chosenAsset)
                     : mxRewriteToVoice(dict, editingContext);
             } @catch (NSException *e) {
                 mxDiag("v2v: rewrite threw — %{public}s", e.reason.UTF8String ?: "?");

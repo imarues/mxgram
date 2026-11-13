@@ -1,5 +1,5 @@
-// Interactive video-note crop picker. Only saves the normalized crop center;
-// the sending hook in VideoToVoice.xm applies it to the rendered MP4.
+// Interactive video-note crop picker. Saves normalized crop center AND zoom.
+// The sending hook applies the exact circle selection to the rendered MP4.
 #import "VideoNoteCrop.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Photos/Photos.h>
@@ -8,9 +8,36 @@
 #import <math.h>
 #import "UI/Headers.h"
 
+// Sideload injection often includes only Mx.dylib (no updated Mx.bundle).
+// Keep the newly introduced picker strings available in Arabic directly;
+// otherwise users with an Arabic interface see English labels.
+static BOOL mxCropArabicInterface(void) {
+    NSString *cancel = [MxLocalization localizedStringForKey:@"CANCEL"];
+    if ([cancel isEqualToString:@"إلغاء"]) return YES;
+    if (cancel.length && ![cancel isEqualToString:@"CANCEL"] &&
+        ![cancel isEqualToString:@"Cancel"]) return NO;
+    NSString *preferred = [NSLocale preferredLanguages].firstObject ?: @"";
+    return [[preferred lowercaseString] hasPrefix:@"ar"];
+}
 static NSString *mxCropText(NSString *key, NSString *fallback) {
-    NSString *s = [MxLocalization localizedStringForKey:key];
-    return (s.length && ![s isEqualToString:key]) ? s : fallback;
+    NSString *localized = [MxLocalization localizedStringForKey:key];
+    if (mxCropArabicInterface()) {
+        static NSDictionary<NSString *, NSString *> *arabic = nil;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            arabic = @{
+                @"VIDEO_NOTE_CROP_TITLE": @"تحديد مكان دائرة الفيديو",
+                @"VIDEO_NOTE_CROP_HINT": @"اسحب الدائرة لتغيير مكانها، وكبّر أو صغّر بإصبعين، ثم اضغط اعتماد وبعدها إرسال.",
+                @"VIDEO_NOTE_CROP_APPLY": @"اعتماد",
+                @"VIDEO_NOTE_CROP_NORMAL": @"فيديو عادي",
+                @"VIDEO_NOTE_CROP_LOADING": @"جارٍ تحميل معاينة الفيديو…",
+                @"VIDEO_NOTE_CROP_ERROR": @"تعذّر فتح معاينة هذا الفيديو.",
+                @"VIDEO_NOTE_CROP_ZOOM": @"التكبير"
+            };
+        });
+        if (arabic[key]) return arabic[key];
+    }
+    return (localized.length && ![localized isEqualToString:key]) ? localized : fallback;
 }
 
 static id mxCropGetter(id object, NSString *getter) {
@@ -89,6 +116,7 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UILabel *hintLabel;
 @property (nonatomic, strong) UILabel *loadingLabel;
+@property (nonatomic, strong) UILabel *zoomLabel;
 @property (nonatomic, strong) UIActivityIndicatorView *spinner;
 @property (nonatomic, strong) UIButton *cancelButton;
 @property (nonatomic, strong) UIButton *normalButton;
@@ -100,19 +128,22 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 @property (nonatomic, assign) CGSize videoSize;
 @property (nonatomic, assign) CGPoint center;
 @property (nonatomic, assign) CGPoint panStart;
+@property (nonatomic, assign) CGFloat cropZoom;
+@property (nonatomic, assign) CGFloat pinchStartZoom;
 @property (nonatomic, assign) BOOL alreadySelected;
-@property (nonatomic, copy) void (^onApply)(CGPoint);
+@property (nonatomic, copy) void (^onApply)(CGPoint, CGFloat);
 @property (nonatomic, copy) dispatch_block_t onSendNormally;
-- (instancetype)initWithCenter:(CGPoint)center active:(BOOL)active;
+- (instancetype)initWithCenter:(CGPoint)center zoom:(CGFloat)zoom active:(BOOL)active;
 - (void)loadVideoItem:(id)item;
 @end
 
 @implementation MxVideoNoteCropController
 
-- (instancetype)initWithCenter:(CGPoint)center active:(BOOL)active {
+- (instancetype)initWithCenter:(CGPoint)center zoom:(CGFloat)zoom active:(BOOL)active {
     if ((self = [super init])) {
         _center = CGPointMake(isfinite(center.x) ? center.x : 0.5,
                               isfinite(center.y) ? center.y : 0.5);
+        _cropZoom = isfinite(zoom) ? fmax(1.0, fmin(5.0, zoom)) : 1.0;
         _alreadySelected = active;
         self.modalPresentationStyle = UIModalPresentationFullScreen;
     }
@@ -149,7 +180,7 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 
     self.hintLabel = [UILabel new];
     self.hintLabel.text = mxCropText(@"VIDEO_NOTE_CROP_HINT",
-             @"Drag the circle, tap Apply, then send in Telegram.");
+             @"Drag to move, pinch with two fingers to zoom, then Apply and Send.");
     self.hintLabel.textColor = [UIColor colorWithWhite:0.83 alpha:1];
     self.hintLabel.font = [UIFont systemFontOfSize:14];
     self.hintLabel.textAlignment = NSTextAlignmentCenter;
@@ -178,7 +209,14 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc]
                                      initWithTarget:self action:@selector(panCrop:)];
+    // One finger moves the circle. Two fingers change its diameter instead of
+    // racing the pan recognizer for the same touches.
+    pan.minimumNumberOfTouches = 1;
+    pan.maximumNumberOfTouches = 1;
     [self.previewHolder addGestureRecognizer:pan];
+    UIPinchGestureRecognizer *pinch = [[UIPinchGestureRecognizer alloc]
+                                        initWithTarget:self action:@selector(pinchCrop:)];
+    [self.previewHolder addGestureRecognizer:pinch];
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc]
                                      initWithTarget:self action:@selector(tapCrop:)];
     [self.previewHolder addGestureRecognizer:tap];
@@ -188,6 +226,18 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
     self.spinner.color = UIColor.whiteColor;
     [self.spinner startAnimating];
     [self.previewHolder addSubview:self.spinner];
+
+    // A tiny zoom readout gives feedback while pinching, without hiding the
+    // circular region or covering the gallery's Send controls.
+    self.zoomLabel = [UILabel new];
+    self.zoomLabel.textColor = UIColor.whiteColor;
+    self.zoomLabel.font = [UIFont monospacedDigitSystemFontOfSize:13
+                                                         weight:UIFontWeightSemibold];
+    self.zoomLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
+    self.zoomLabel.textAlignment = NSTextAlignmentCenter;
+    self.zoomLabel.layer.cornerRadius = 10;
+    self.zoomLabel.clipsToBounds = YES;
+    [self.previewHolder addSubview:self.zoomLabel];
 
     self.loadingLabel = [UILabel new];
     self.loadingLabel.text = mxCropText(@"VIDEO_NOTE_CROP_LOADING", @"Loading video preview…");
@@ -242,6 +292,7 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
                                       CGRectGetMidY(self.previewHolder.bounds) - 10);
     self.loadingLabel.frame = CGRectMake(10, CGRectGetMidY(self.previewHolder.bounds) + 20,
                                          contentWidth - 20, 30);
+    self.zoomLabel.frame = CGRectMake(CGRectGetMaxX(self.previewHolder.bounds) - 82, 12, 70, 27);
     [self updateCircle];
 }
 
@@ -251,8 +302,10 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
     return AVMakeRectWithAspectRatioInsideRect(self.videoSize, available);
 }
 
-// The circle diameter is the shorter displayed video dimension, exactly
-// matching the square (and later circular) crop exported at 640x640.
+// At 1× the circle selects the maximum possible square. A two-finger
+// pinch adjusts the amount of source video inside that same 640×640 note.
+// Shrinking the visible circle is equivalent to zooming IN the final result;
+// expanding it again zooms OUT, up to the full original square (1×).
 - (void)updateCircle {
     CGRect image = [self videoRect];
     if (CGRectIsEmpty(image)) {
@@ -260,7 +313,7 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
         self.circleLayer.path = nil;
         return;
     }
-    CGFloat diameter = MIN(image.size.width, image.size.height);
+    CGFloat diameter = MIN(image.size.width, image.size.height) / self.cropZoom;
     CGFloat halfX = diameter / (2.0 * image.size.width);
     CGFloat halfY = diameter / (2.0 * image.size.height);
     self.center = CGPointMake(fmax(halfX, fmin(1.0 - halfX, self.center.x)),
@@ -273,6 +326,7 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
     [shade appendPath:[UIBezierPath bezierPathWithOvalInRect:ring]];
     self.shadowLayer.path = shade.CGPath;
     self.circleLayer.path = [UIBezierPath bezierPathWithOvalInRect:ring].CGPath;
+    self.zoomLabel.text = [NSString stringWithFormat:@"%.1f×", (double)self.cropZoom];
 }
 
 - (void)panCrop:(UIPanGestureRecognizer *)pan {
@@ -285,6 +339,23 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
         CGPoint shift = [pan translationInView:self.previewHolder];
         self.center = CGPointMake(self.panStart.x + shift.x / image.size.width,
                                    self.panStart.y + shift.y / image.size.height);
+        [self updateCircle];
+    }
+}
+
+- (void)pinchCrop:(UIPinchGestureRecognizer *)pinch {
+    if (CGRectIsEmpty([self videoRect])) return;
+    if (pinch.state == UIGestureRecognizerStateBegan) {
+        self.pinchStartZoom = self.cropZoom;
+    }
+    if (pinch.state == UIGestureRecognizerStateBegan ||
+        pinch.state == UIGestureRecognizerStateChanged ||
+        pinch.state == UIGestureRecognizerStateEnded) {
+        // Fingers moving APART zoom in (smaller source crop). Moving TOGETHER
+        // zooms back out. Never exceed the original video's edges.
+        CGFloat candidate = self.pinchStartZoom * pinch.scale;
+        if (!isfinite(candidate)) return;
+        self.cropZoom = fmax(1.0, fmin(5.0, candidate));
         [self updateCircle];
     }
 }
@@ -358,9 +429,10 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 - (void)applyCrop {
     if (!self.applyButton.enabled || CGRectIsEmpty([self videoRect])) return;
     CGPoint selected = self.center;
-    void (^completion)(CGPoint) = self.onApply;
+    CGFloat zoom = self.cropZoom;
+    void (^completion)(CGPoint, CGFloat) = self.onApply;
     [self dismissViewControllerAnimated:YES completion:^{
-        if (completion) completion(selected);
+        if (completion) completion(selected, zoom);
     }];
 }
 
@@ -371,8 +443,10 @@ static CGSize mxCropOrientedSize(AVAsset *asset) {
 
 @end
 
-void MxPresentVideoNoteCrop(UIView *sourceView, id galleryItem, CGPoint initialCenter,
-                            BOOL alreadySelected, void (^onApply)(CGPoint center),
+void MxPresentVideoNoteCrop(UIView *sourceView, id galleryItem,
+                            CGPoint initialCenter, CGFloat initialZoom,
+                            BOOL alreadySelected,
+                            void (^onApply)(CGPoint center, CGFloat zoom),
                             dispatch_block_t onSendNormally) {
     if (!sourceView.window || !galleryItem) return;
     UIViewController *presenter = sourceView.window.rootViewController;
@@ -382,7 +456,8 @@ void MxPresentVideoNoteCrop(UIView *sourceView, id galleryItem, CGPoint initialC
     }
     if (!presenter) return;
     MxVideoNoteCropController *picker =
-        [[MxVideoNoteCropController alloc] initWithCenter:initialCenter active:alreadySelected];
+        [[MxVideoNoteCropController alloc] initWithCenter:initialCenter
+                                                    zoom:initialZoom active:alreadySelected];
     picker.onApply = onApply;
     picker.onSendNormally = onSendNormally;
     [presenter presentViewController:picker animated:YES completion:nil];
