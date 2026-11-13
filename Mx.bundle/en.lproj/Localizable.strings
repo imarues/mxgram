@@ -159,6 +159,12 @@
 "VIDEO_TO_NOTE_CONVERTING" = "Converting video to a round video note…";
 "VIDEO_TO_NOTE_SUCCESS" = "Round video ready — sending";
 "VIDEO_TO_NOTE_FAILED" = "Could not convert video — sending the original video instead";
+"VIDEO_NOTE_CROP_TITLE" = "Choose video note crop";
+"VIDEO_NOTE_CROP_HINT" = "Drag the circle, tap Apply, then send in Telegram.";
+"VIDEO_NOTE_CROP_APPLY" = "Apply";
+"VIDEO_NOTE_CROP_NORMAL" = "Normal video";
+"VIDEO_NOTE_CROP_LOADING" = "Loading video preview…";
+"VIDEO_NOTE_CROP_ERROR" = "Could not load this video.";
 
 /* First-run alert */
 "WELCOME_BODY" = "Mx is installed.\n\nTo open the Mx menu:\n%@";
