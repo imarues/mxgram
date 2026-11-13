@@ -115,6 +115,25 @@ final class MxPurgeCodec: NSObject {
         return nil
     }
 
+    // Read the account's own PeerId from the chat controller's AccountContext.
+    // Refuse to rely on the global saved user id (multi-account unsafe).
+    @objc(accountIdForContext:)
+    static func accountIdForContext(_ context: AnyObject) -> NSNumber? {
+        var mirror: Mirror? = Mirror(reflecting: context)
+        while let m = mirror {
+            for child in m.children where child.label == "account" {
+                for field in Mirror(reflecting: child.value).children where field.label == "peerId" {
+                    if let key = peerIdKey(field.value), key.hasPrefix("0:"),
+                       let id = Int64(key.dropFirst(2)), id > 0 {
+                        return NSNumber(value: id)
+                    }
+                }
+            }
+            mirror = m.superclassMirror
+        }
+        return nil
+    }
+
     @objc(makeSelfCheck)
     static func makeSelfCheck() -> NSData {
         let call = Api.functions.users.getUsers(id: [.inputUserSelf])
