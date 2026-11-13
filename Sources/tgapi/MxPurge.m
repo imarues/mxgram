@@ -128,18 +128,26 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
 - (void)positionButton:(MxPurgeContext *)ctx {
     UIViewController *vc = ctx.controller;
     UIView *host = vc.view;
-    if (!host || !ctx.button || !host.window) return;
+    UIWindow *window = host.window;
+    if (!host || !ctx.button || !window || ctx.cancelled) return;
     CGFloat width = CGRectGetWidth(host.bounds);
     CGFloat height = CGRectGetHeight(host.bounds);
     if (width < 100 || height < 200) return;
     CGFloat safeTop = host.safeAreaInsets.top;
-    // Below the custom navigation + pinned-message bar. Does not steal touches
-    // from the back button, avatar, title, or the message composer.
+    // The AsyncDisplayKit chat view constantly inserts its own overlay nodes,
+    // so a button hosted inside vc.view can be visible while taps pass through
+    // to a message below. Host it above the chat in the same UIWindow.
+    // Convert the exact chat-local position; never guess screen coordinates.
     CGFloat y = MIN(MAX(safeTop + 132.0, 124.0), height - host.safeAreaInsets.bottom - 72.0);
     CGFloat x = width - host.safeAreaInsets.right - 54.0;
-    ctx.button.frame = CGRectMake(MAX(8.0, x), y, 44.0, 44.0);
-    if (ctx.button.superview != host) [host addSubview:ctx.button];
-    [host bringSubviewToFront:ctx.button];
+    CGRect localFrame = CGRectMake(MAX(8.0, x), y, 44.0, 44.0);
+    ctx.button.frame = [host convertRect:localFrame toView:window];
+    if (ctx.button.superview != window) {
+        [ctx.button removeFromSuperview];
+        [window addSubview:ctx.button];
+    }
+    // Telegram may mount later window subviews during chat transitions.
+    [window bringSubviewToFront:ctx.button];
 }
 - (void)settingsChanged {
     if (![self enabled]) {
@@ -194,7 +202,9 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         button.layer.cornerRadius = 22.0;
         button.layer.borderWidth = 1.0;
         button.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.18].CGColor;
-        button.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.86];
+        button.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.98];
+        button.exclusiveTouch = YES;
+        button.userInteractionEnabled = YES;
         [button addTarget:self action:@selector(tapped:) forControlEvents:UIControlEventTouchUpInside];
         ctx.button = button;
     }
@@ -230,8 +240,14 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
         else color = [UIColor systemRedColor];
     }
     ctx.button.tintColor = color;
-    ctx.button.enabled = !ctx.busy && !ctx.verifiedEmpty && !ctx.cancelled;
-    ctx.button.alpha = ctx.button.enabled ? 1.0 : 0.70;
+    ctx.button.layer.borderColor = [color colorWithAlphaComponent:0.80].CGColor;
+    // IMPORTANT: an unverified/working/empty trash must still receive taps.
+    // Disabling UIControl made it translucent and caused a silent no-op. The
+    // action handler alone decides whether verification/deletion is allowed.
+    ctx.button.enabled = !ctx.cancelled;
+    ctx.button.userInteractionEnabled = !ctx.cancelled;
+    ctx.button.alpha = 1.0;
+    ctx.button.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.98];
 }
 - (void)message:(NSString *)message title:(NSString *)title context:(MxPurgeContext *)ctx {
     UIViewController *vc = ctx.controller;
@@ -348,7 +364,22 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
 }
 - (void)tapped:(UIButton *)button {
     MxPurgeContext *ctx = objc_getAssociatedObject(self.visibleChat, kMxPurgeContextKey);
-    if (!ctx || ctx.button != button || ctx.busy) return;
+    if (!ctx || ctx.button != button || ctx.cancelled) return;
+    if (ctx.busy) {
+        [self message:mxPurgeText(
+            ctx.batchCount > 0 ? @"الحذف جارٍ الآن في هذه المحادثة. لا تبدأ عملية ثانية."
+                               : @"جار التحقق من هذه المحادثة والحساب، ولم يبدأ حذف أي رسالة.",
+            ctx.batchCount > 0 ? @"Deletion is running only in this chat. Do not start another job."
+                               : @"Verifying this chat and account. No messages have been deleted.")
+                 title:mxPurgeText(@"حالة السلة", @"Trash status") context:ctx];
+        return;
+    }
+    if (ctx.verifiedEmpty) {
+        [self message:mxPurgeText(@"تم التحقق: لا توجد رسائل مرسلة منك يمكن العثور عليها في هذه المحادثة.",
+                                  @"Verified: no messages sent by you were found in this chat.")
+                 title:mxPurgeText(@"لا توجد رسائل", @"No messages found") context:ctx];
+        return;
+    }
     if (!ctx.scanned || ![self stillCurrent:ctx]) {
         // Retry verification when possible, but never bypass it to delete.
         if (!ctx.busy && ctx.peerKey.length && ctx.accountId.longLongValue > 0) {
@@ -359,7 +390,6 @@ typedef void (^MxPurgeResult)(NSData *response, NSString *error);
                  title:mxPurgeText(@"الحذف غير متاح حالياً", @"Deletion unavailable") context:ctx];
         return;
     }
-    if (ctx.verifiedEmpty) return;
     NSString *chat = ctx.controller.navigationItem.title ?: ctx.controller.title ?: ctx.peerKey;
     NSString *title = mxPurgeText(@"حذف كل رسائلي", @"Delete My Messages");
     NSString *description = mxPurgeText(
